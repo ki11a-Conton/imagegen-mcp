@@ -3,8 +3,9 @@
 // 排版原则：
 // - 文件名放最后一列，前面全是等宽 ASCII 列（序号/类型/状态/耗时/尺寸），
 //   中文文件名不会把对齐撑歪。
-// - 表格路径相对输出根，末尾单独列绝对路径。
-// - 末尾直接给出可粘贴的 Markdown 图片引用：单张一行，多张排成每行两张的表格。
+// - 表格路径相对输出根，绝对路径单独列。
+// - Markdown 图片引用直接给出可粘贴的块：单张一行，多张每行两张的表格。
+// - 只在需要时附加提示，不制造噪音。
 // - 不使用任何 emoji。
 
 const KB = 1024;
@@ -37,16 +38,19 @@ const relTo = (path, root) => {
 /** 路径用尖括号包住，中文与空格都不会破坏 Markdown 语法。 */
 const imageRef = (file) => `![${basename(file.path)}](<${file.path}>)`;
 
+/**
+ * 每张一行给引用，不预设排版。
+ * 想看并排就自己包一层表格，单张就直接发一行。
+ */
 function markdownBlock(files) {
   if (files.length === 0) return [];
-  if (files.length === 1) return [imageRef(files[0])];
 
-  const cells = files.map(imageRef);
-  const rows = [];
-  for (let i = 0; i < cells.length; i += 2) {
-    rows.push(`| ${cells[i]} | ${cells[i + 1] ?? ""} |`);
+  const lines = files.map(imageRef);
+  if (files.length > 1) {
+    const sample = files.slice(0, 2).map(imageRef).join(" | ");
+    lines.push("", `并排示例：| ${sample} |`);
   }
-  return ["| | |", "| --- | --- |", ...rows];
+  return lines;
 }
 
 /** 等宽列对齐，最后一列自由宽度。 */
@@ -65,15 +69,15 @@ function table(rows, headers) {
 
 export function formatReport(batch, { root } = {}) {
   const { results, concurrency, ms, jobs } = batch;
-  const okCount = results.filter(({ ok }) => ok).length;
   const succeeded = results.filter(({ ok }) => ok);
+  const failed = results.filter(({ ok }) => !ok);
   const files = succeeded.flatMap(({ files }) => files);
 
   const models = [...new Set(jobs.map(({ model }) => model))];
   const modelLabel = models.length === 1 ? models[0] : "mixed";
 
   const lines = [
-    `${okCount}/${results.length} ok  ${fmtSeconds(ms)}  concurrency=${concurrency}  model=${modelLabel}`,
+    `${succeeded.length}/${results.length} ok  ${fmtSeconds(ms)}  concurrency=${concurrency}  model=${modelLabel}`,
   ];
 
   const dirs = [...new Set(succeeded.map(({ dir }) => dir))];
@@ -90,18 +94,30 @@ export function formatReport(batch, { root } = {}) {
 
   lines.push("", ...table(rows, ["#", "type", "status", "time", "size", "file"]));
 
-  const notes = succeeded
-    .filter(({ note }) => note)
-    .map(({ index, note }) => `  #${index + 1}  ${oneLine(note)}`);
-  if (notes.length) lines.push("", ...notes);
+  // 只在需要时提示，不制造噪音。
+  const hints = [];
+
+  if (failed.length > 0) {
+    hints.push(`  ${failed.length} 个任务失败，已成功的文件保留；失败组可用同样参数重发`);
+  }
+
+  for (const { index, note } of succeeded) {
+    if (note) hints.push(`  #${index + 1}  ${oneLine(note)}`);
+  }
+
+  if (files.length > 1 && dirs.length === 0) {
+    hints.push("  多组落在不同目录，引用时注意路径");
+  }
+
+  if (hints.length) lines.push("", ...hints);
 
   if (files.length > 0) {
+    lines.push("", "markdown:", ...markdownBlock(files));
     lines.push(
       "",
-      "files:",
+      "paths:",
       ...files.map((file) => `  ${file.path}  (${fmtDims(file)}, ${fmtBytes(file.bytes)})`),
     );
-    lines.push("", files.length === 1 ? "markdown:" : "markdown (2 per row):", ...markdownBlock(files));
   }
 
   return lines.join("\n");

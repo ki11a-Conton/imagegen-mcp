@@ -63,14 +63,11 @@ async function main() {
     const reference = join(workspace, "reference.png");
     await writeFile(reference, PNG_1X1);
 
-    await check("list_models 报告上游可达", async () => {
-      const text = textOf(await client.callTool({ name: "list_models", arguments: {} }));
-      const payload = JSON.parse(text);
-      if (payload.upstream.reachable !== true) throw new Error("upstream 应可达");
-      if (!Array.isArray(payload.upstream.models) || payload.upstream.models.length === 0) {
-        throw new Error("应返回上游模型列表");
-      }
-      if (payload.limits.maxJobs !== 8) throw new Error("maxJobs 应为 8");
+    await check("imagegen_info 报告上游可达与用法", async () => {
+      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
+      if (!text.includes("upstream  ok")) throw new Error("应报告上游可达: " + text);
+      if (!text.includes("usage")) throw new Error("应给出用法速查: " + text);
+      if (!text.includes("jobs<=8")) throw new Error("应报告上限: " + text);
     });
 
     await check("单任务简写可用", async () => {
@@ -103,7 +100,7 @@ async function main() {
       if (!text.includes("3/3 ok")) throw new Error("应 3 个全成功: " + text);
       if (mock.stats.generations - before.generations !== 2) throw new Error("应有 2 次文生图");
       if (mock.stats.edits - before.edits !== 1) throw new Error("应有 1 次图生图");
-      if (!text.includes("markdown (2 per row):")) throw new Error("多张应输出表格形式: " + text);
+      if (!text.includes("markdown:")) throw new Error("应输出 markdown 块: " + text);
     });
 
     await check("并发确实并行执行", async () => {
@@ -180,6 +177,89 @@ async function main() {
       );
       if (!/!\[mdshot\.png\]\(<[^)]+mdshot\.png>\)/.test(text)) {
         throw new Error("应输出尖括号包裹的图片引用: " + text);
+      }
+    });
+
+    await check("批量内每个任务完全独立：参考图、参数、输出路径互不干扰", async () => {
+      const referenceA = join(workspace, "ref-a.png");
+      const referenceB = join(workspace, "ref-b.png");
+      await writeFile(referenceA, PNG_1X1);
+      await writeFile(referenceB, Buffer.concat([PNG_1X1, Buffer.from([0])]));
+
+      const dirA = join(workspace, "independent", "alpha");
+      const dirB = join(workspace, "independent", "beta");
+      mock.stats.payloads = [];
+
+      const result = await client.callTool({
+        name: "create_images",
+        arguments: {
+          // 顶层默认值，应被任务级逐项覆盖。
+          ratio: "1:1",
+          folder: "shared",
+          n: 1,
+          jobs: [
+            {
+              prompt: "任务一 纯文生图",
+              output_dir: dirA,
+              ratio: "16:9",
+              name: "one",
+              model: "gpt-image-2",
+            },
+            {
+              prompt: "任务二 参考图 A",
+              images: [referenceA],
+              output_dir: dirB,
+              ratio: "9:16",
+              name: "two",
+              model: "gpt-image-2.5",
+            },
+            {
+              prompt: "任务三 两张参考图",
+              images: [referenceA, referenceB],
+              output_dir: dirB,
+              folder: "nested/deep",
+              name: "three",
+              n: 2,
+            },
+          ],
+        },
+      });
+
+      if (!textOf(result).includes("3/3 ok")) throw new Error("三个任务都应成功: " + textOf(result));
+
+      // 参考图各自独立：0 张、1 张、2 张。
+      const byPrompt = (needle) => mock.stats.payloads.find((p) => p.prompt.includes(needle));
+      const one = byPrompt("任务一");
+      const two = byPrompt("任务二");
+      const three = byPrompt("任务三");
+
+      if (!one || !two || !three) throw new Error("应收到三次上游请求");
+      if (one.imageCount !== 0 || one.route !== "gen") throw new Error("任务一应是纯文生图");
+      if (two.imageCount !== 1 || two.route !== "edit") throw new Error("任务二应带 1 张参考图");
+      if (three.imageCount !== 2 || three.route !== "edit") throw new Error("任务三应带 2 张参考图");
+
+      // 参数各自独立：模型、比例、张数。
+      if (one.model !== "gpt-image-2") throw new Error("任务一模型应独立: " + one.model);
+      if (two.model !== "gpt-image-2.5") throw new Error("任务二模型应独立: " + two.model);
+
+      // 任务一 16:9、任务二 9:16，各自把比例写进自己的提示词。
+      if (!one.prompt.includes("16:9")) throw new Error("任务一提示词应含 16:9");
+      if (!two.prompt.includes("9:16")) throw new Error("任务二提示词应含 9:16");
+      if (three.n !== 2) throw new Error("任务三张数应独立: " + three.n);
+
+      // 输出路径：任务级 output_dir 生效；folder 可继承也可覆盖。
+      const filesA = await readdir(join(dirA, "shared")).catch(() => []);
+      const filesB = await readdir(join(dirB, "shared")).catch(() => []);
+      const filesC = await readdir(join(dirB, "nested", "deep")).catch(() => []);
+
+      if (filesA.length !== 1) throw new Error("任务一应落到 dirA/shared，实际 " + filesA.length);
+      if (filesB.length !== 1) throw new Error("任务二应落到 dirB/shared，实际 " + filesB.length);
+      if (filesC.length !== 2) throw new Error("任务三应落到嵌套目录且 2 张，实际 " + filesC.length);
+
+      if (!filesA[0].startsWith("one")) throw new Error("任务一文件名应为 one，实际 " + filesA[0]);
+      if (!filesB[0].startsWith("two")) throw new Error("任务二文件名应为 two，实际 " + filesB[0]);
+      if (!filesC.every((name) => name.startsWith("three"))) {
+        throw new Error("任务三文件名应以 three 开头，实际 " + filesC.join(","));
       }
     });
 
@@ -264,8 +344,8 @@ async function main() {
       if (bytes[0] !== 0x89 || bytes.subarray(1, 4).toString("latin1") !== "PNG") {
         throw new Error("落盘文件应是 PNG");
       }
-      const text = textOf(await client.callTool({ name: "list_models", arguments: {} }));
-      if (!text.includes("outputDir")) throw new Error("list_models 应报告输出目录");
+      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
+      if (!text.includes("output=")) throw new Error("imagegen_info 应报告输出目录");
     });
 
     await client.close();
