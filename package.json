@@ -11,10 +11,11 @@
     "test": "node test/selftest.mjs && node test/integration.mjs",
     "test:unit": "node test/selftest.mjs",
     "test:integration": "node test/integration.mjs",
-    "lint": "eslint src test",
+    "lint": "eslint src test .github/scripts",
     "format": "prettier --write \"src/**/*.mjs\" \"test/**/*.mjs\" \".github/**/*.{mjs,yml}\"",
     "format:check": "prettier --check \"src/**/*.mjs\" \"test/**/*.mjs\" \".github/**/*.{mjs,yml}\"",
-    "verify": "npm run lint && npm run format:check && npm test"
+    "verify": "npm run lint && npm run format:check && npm run check:emoji && npm test",
+    "check:emoji": "node .github/scripts/check-emoji.mjs"
   },
   "files": [
     "src/",
