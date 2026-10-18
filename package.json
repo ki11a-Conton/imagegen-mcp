@@ -1,0 +1,20 @@
+{
+  "name": "imagegen-mcp",
+  "version": "0.5.2",
+  "description": "MCP server exposing chatgpt2api image generation and image editing to DSH, because DSH has no built-in image generation. Streams SSE so it also works behind Cloudflare tunnels.",
+  "type": "module",
+  "bin": {
+    "imagegen-mcp": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}
