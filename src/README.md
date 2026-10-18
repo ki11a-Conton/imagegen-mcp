@@ -5,7 +5,7 @@
 | 文件 | 职责 | 关键导出 | 被谁依赖 |
 | --- | --- | --- | --- |
 | `index.mjs` | 入口，建 McpServer 与 stdio 连接 | 无 | 无 |
-| `tools.mjs` | 工具注册与 schema，含 `imagegen_info` 的用法速查文案 | `registerTools` | index |
+| `tools.mjs` | 工具注册与 schema，含 `info` 的用法速查文案 | `registerTools` | index |
 | `job.mjs` | 任务归一化、路由、单次并发池、进程级在途闸门、错误隔离 | `runJobs` | tools |
 | `report.mjs` | 返回排版，纯函数不碰 IO | `formatReport` | tools |
 | `upstream.mjs` | SSE 客户端与模型探测 | `callUpstream`、`probeModels` | job, tools |

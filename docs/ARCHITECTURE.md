@@ -10,7 +10,7 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。
 - 传输固定 SSE。经 Cloudflare 免费版隧道时，非流式必被 100 秒源站超时掐成 524。
 - stdout 只能有 JSON-RPC 帧。任何日志走 stderr，否则污染协议流。
 - 落盘绝不覆盖已有文件。并发与重名靠随机量与独占创建解决，不靠调用方自律。
-- 方形才下发像素尺寸。非方形靠提示词约束构图，避免上游方图被本地硬拉变形。
+- 方形才下发像素尺寸。非方形靠提示词约束构图，避免上游方图被服务端硬拉变形。
 - 超时以服务端 deadline 为准。我们自己的超时更大，改它不解决 503。
 
 ## 谁定边界
@@ -73,5 +73,6 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 方括号是 alt 不是图注：要配文另起一段，要可点链接去掉感叹号。
 - `env` 只认七个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`、`IMAGEGEN_MAX_RETRIES`。
 - 网关类错误（502 503 504 524）必须走重试，且错误文本要压成一行：网关返回整页 HTML，原样塞进返回会撑爆表格。
+  唯一的例外是 503 带 `task_interrupted`：那是服务端 deadline 判定，重试只会再撞同一条截止线。
 - 单张参考图上限 30MB（服务端硬上限 50MB，base64 还有约 1/3 膨胀）。
 - 文件名扩展名由字节魔数决定，不信任上游声称的格式。
