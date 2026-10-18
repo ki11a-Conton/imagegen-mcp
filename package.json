@@ -1,14 +1,28 @@
 {
   "name": "imagegen-mcp",
-  "version": "0.5.2",
-  "description": "MCP server exposing chatgpt2api image generation and image editing to DSH, because DSH has no built-in image generation. Streams SSE so it also works behind Cloudflare tunnels.",
+  "version": "0.6.0",
+  "description": "MCP server that exposes chatgpt2api image generation and editing to DSH, with batched jobs, automatic routing and automatic concurrency. Streams SSE so it also works behind Cloudflare tunnels.",
   "type": "module",
   "bin": {
     "imagegen-mcp": "src/index.mjs"
   },
   "scripts": {
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "test": "node test/selftest.mjs && node test/integration.mjs",
+    "test:unit": "node test/selftest.mjs",
+    "test:integration": "node test/integration.mjs",
+    "lint": "eslint src test",
+    "format": "prettier --write \"src/**/*.mjs\" \"test/**/*.mjs\" \".github/**/*.{mjs,yml}\"",
+    "format:check": "prettier --check \"src/**/*.mjs\" \"test/**/*.mjs\" \".github/**/*.{mjs,yml}\"",
+    "verify": "npm run lint && npm run format:check && npm test"
   },
+  "files": [
+    "src/",
+    "test/",
+    "install.ps1",
+    "README.md",
+    "AGENTS.md"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -16,5 +30,11 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10"
   }
 }
