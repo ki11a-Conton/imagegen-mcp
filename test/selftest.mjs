@@ -236,6 +236,16 @@ await check("混合模型标注为 mixed", () => {
   assert.match(formatReport(batch, { root: "D:/out" }), /model=mixed/);
 });
 
+await check("闸门比 worker 池窄时如实标注生效并发", () => {
+  const text = formatReport(sampleBatch({ concurrency: 6, gate: 4 }), { root: "D:/out" });
+  assert.match(text, /concurrency=6\(gate 4\)/);
+});
+
+await check("闸门不比池窄时只报一个数", () => {
+  const text = formatReport(sampleBatch({ concurrency: 3, gate: 4 }), { root: "D:/out" });
+  assert.match(text, /concurrency=3\s/);
+});
+
 // --- 结果 ---
 if (failures.length > 0) {
   console.log(passed + " passed, " + failures.length + " failed");

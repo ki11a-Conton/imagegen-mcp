@@ -207,5 +207,5 @@ export async function runJobs(rawJobs, defaults, concurrency) {
   const results = prepared.map((entry) => (entry.ok ? queue.shift() : entry.failure));
 
   const jobs = prepared.filter((entry) => entry.ok).map((entry) => entry.job);
-  return { results, jobs, concurrency: limit, ms: Date.now() - startedAt };
+  return { results, jobs, concurrency: limit, gate: MAX_GLOBAL_CONCURRENCY, ms: Date.now() - startedAt };
 }

@@ -68,7 +68,7 @@ function table(rows, headers) {
 }
 
 export function formatReport(batch, { root } = {}) {
-  const { results, concurrency, ms, jobs } = batch;
+  const { results, concurrency, gate, ms, jobs } = batch;
   const succeeded = results.filter(({ ok }) => ok);
   const failed = results.filter(({ ok }) => !ok);
   const files = succeeded.flatMap(({ files }) => files);
@@ -76,8 +76,12 @@ export function formatReport(batch, { root } = {}) {
   const models = [...new Set(jobs.map(({ model }) => model))];
   const modelLabel = models.length === 1 ? models[0] : "mixed";
 
+  // 单次调用的 worker 池可能比进程级闸门还宽，闸门才是真正生效的并发。
+  // 只报池上限会让调用方以为自己真的在跑那么多路。
+  const concurrencyLabel = gate && gate < concurrency ? `${concurrency}(gate ${gate})` : String(concurrency);
+
   const lines = [
-    `${succeeded.length}/${results.length} ok  ${fmtSeconds(ms)}  concurrency=${concurrency}  model=${modelLabel}`,
+    `${succeeded.length}/${results.length} ok  ${fmtSeconds(ms)}  concurrency=${concurrencyLabel}  model=${modelLabel}`,
   ];
 
   const dirs = [...new Set(succeeded.map(({ dir }) => dir))];

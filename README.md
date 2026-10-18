@@ -20,7 +20,8 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 - 图片默认落到项目 `output/`，也可用 `output_dir` 指到本机任意绝对目录，指哪落哪。
 - 绝不覆盖已有文件：并发同一秒完成也不会互相覆盖。
 - 返回里带好可直接粘贴的 Markdown 图片引用，路径已转正斜杠，排版模板见 `info` 工具。
-- 固定走 SSE，经 Cloudflare 隧道不会被 100 秒源站超时掐成 524。
+- 固定走 SSE：响应头立刻返回，生成耗时超过代理 100 秒也不会被掐。
+  但**上传阶段**不在此列，带多张大参考图的请求体仍可能被 Cloudflare 掐成 524。
 
 ## 安装
 
@@ -157,7 +158,7 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | 每组张数 | `n` | 1 到 4 |
 | 我们这边等多久 | `IMAGEGEN_TIMEOUT_MS` | 默认 600 秒 |
 | MCP 客户端等多久 | DSH 的 `toolCallTimeoutMs` | 默认配 660 秒 |
-| 网关类错误重试几次 | `IMAGEGEN_MAX_RETRIES` | 默认 2，只对 502 503 504 524 生效 |
+| 网关类错误重试几次 | `IMAGEGEN_MAX_RETRIES` | 默认 2，只对 502 503 504 524 生效；503 若带 `task_interrupted`（服务端 deadline）不重试 |
 | 输出文件路径 | `output` | 逐任务给完整绝对路径 |
 | 输出目录与分类 | `output_dir` `folder` | 不给 `output` 时用 |
 
@@ -177,6 +178,8 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 
 **关键**：我们的超时比服务端大，所以实际生效的是服务端那个。
 单张超过服务端 deadline 会先收到 503，调 `IMAGEGEN_TIMEOUT_MS` 不解决问题。
+这种 503 带 `task_interrupted`，**不会重试**：同一份请求再发一次只会再撞同一条截止线，
+重试两次能把一次调用拖到 30 分钟，而 MCP 客户端早就先超时了。
 
 ## 尺寸与比例
 

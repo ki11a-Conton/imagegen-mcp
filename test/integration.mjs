@@ -341,6 +341,22 @@ async function main() {
       }
     });
 
+    await check("服务端 deadline 的 503 不重试，只打上游一次", async () => {
+      mock.stats.deadline503 = 0;
+      const text = textOf(
+        await client.callTool({
+          name: "create_images",
+          arguments: { prompt: "deadline-503 触发超时", folder: "deadline" },
+        }),
+      );
+      if (!text.includes("0/1 ok")) throw new Error("应判失败: " + text);
+      if (mock.stats.deadline503 !== 1) {
+        throw new Error(
+          "应只请求上游 1 次（重试说明 deadline 503 被误判为可重试），实际 " + mock.stats.deadline503,
+        );
+      }
+    });
+
     await check("落盘文件是真实 PNG 且尺寸可读", async () => {
       const entries = await readdir(join(workspace, "md"));
       const bytes = await readFile(join(workspace, "md", entries[0]));

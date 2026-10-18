@@ -30,7 +30,7 @@ async function readBody(request) {
  * @returns {Promise<{ url: string, close: () => Promise<void>, stats: object }>}
  */
 export async function startMockUpstream({ delayMs = 0 } = {}) {
-  const stats = { generations: 0, edits: 0, peakConcurrent: 0, active: 0, payloads: [] };
+  const stats = { generations: 0, edits: 0, deadline503: 0, peakConcurrent: 0, active: 0, payloads: [] };
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -67,6 +67,18 @@ export async function startMockUpstream({ delayMs = 0 } = {}) {
       imageCount: Array.isArray(body.images) ? body.images.length : 0,
       imageHashes: Array.isArray(body.images) ? body.images.map((item) => String(item).slice(-24)) : [],
     });
+
+    // 特殊约定：提示词里带 deadline-503 时，模拟服务端判定的截止超时。
+    // 这种 503 重试没有意义，客户端必须只打一次就失败。
+    if (typeof body.prompt === "string" && body.prompt.includes("deadline-503")) {
+      stats.deadline503 += 1;
+      stats.active -= 1;
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ error: { message: "task_interrupted: 超过 image_request_timeout_secs" } }),
+      );
+      return;
+    }
 
     response.writeHead(200, {
       "content-type": "text/event-stream",
