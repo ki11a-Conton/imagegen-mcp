@@ -1,8 +1,8 @@
-// 工具面：两个工具，分工单一。
+// 工具面：两个工具，命名对齐（一个动作、一个查询）。
 //   create_images   执行：批量生图 / 改图
-//   imagegen_info   查询：用法速查 + 当前配置
+//   info            查询：参数、输出位置、展示规范、当前配置
 //
-// 描述只写「什么时候用、最容易踩的一条」，具体技巧放 imagegen_info 的输出。
+// 描述只写「什么时候用、最容易踩的一条」，具体技巧放 info 的输出。
 // 描述写太长会被略读，技巧塞在这里等于没写。
 
 import { z } from "zod";
@@ -46,22 +46,63 @@ const jobSchema = z.object({
   quality: qualityEnum.optional().describe("质量档。上游无差异，一般不用传。"),
   model: z.enum(IMAGE_MODELS).optional().describe("图片模型。四个名字在上游同一个 auto 路由。"),
   folder: z.string().optional().describe("输出根目录下的子目录，支持 a/b 多级。"),
-  output_dir: z.string().optional().describe("覆盖输出根目录。一般不传。"),
+  output_dir: z
+    .string()
+    .optional()
+    .describe("绝对路径，指哪落哪，不会追加子目录。默认 <项目根>/output，只是缺省值。"),
 });
 
-/** 用法速查。放在查询工具的输出里，而不是塞进工具描述。 */
-const USAGE = [
+// 用法与排版规范。放在查询工具的输出里，而不是塞进工具描述：
+// 描述写长了会被略读，技巧放这里才能被按需查到。
+
+/** 参数速查。 */
+const PARAMS = [
   "批量        jobs: [{prompt}, {prompt}]  一次调用跑多组，自动并发",
+  "只要一张    单任务可用顶层 prompt 简写，不必写 jobs",
   "文生图      job 不带 images",
   "图生图      job 带 images，最多 16 张，第一张是被改的主体",
-  "换位置      output_dir: 任意绝对路径，直接落在那儿，不会再套子目录",
-  '分类归档    folder: "rabbit/refs"       相对输出根，不要写绝对路径',
-  '固定文件名  name: "三视图"              重名自动加 -2，不会覆盖',
   '横竖版      ratio: "16:9" 或 "9:16"     不要用 size，会变形',
-  "同题多张    n: 2 到 4",
   '清晰度      resolution: "2k"            只对方形生效',
-  "只要一张    单任务可用顶层 prompt 简写，不必写 jobs",
-  "展示        返回里的 markdown 块可直接粘贴；单张一行，并排与否自定",
+  "同题多张    n: 2 到 4",
+];
+
+/** 输出位置。默认只是默认，不是限制。 */
+const OUTPUT = [
+  "默认        <项目根>/output，仅作为缺省值",
+  '换位置      output_dir: "E:/任意/绝对/路径"  指哪落哪，不追加子目录',
+  '分类        folder: "rabbit/refs"            相对输出根，不要写绝对路径',
+  '文件名      name: "三视图"                   重名自动加 -2，不会覆盖',
+];
+
+/** 展示规范。图片怎么排才不会被渲染破坏。 */
+const DISPLAY_RULES = [
+  "图片独立成段     前后各留一个空行，否则会被并进文字段落或标题",
+  "一格只放一个元素 要么一张图，要么一段文字；单元格内不能换行，HTML 标签不解析",
+  "图文相邻不用表格 改用普通段落：文字、空行、图片、空行",
+  "表格只有两种    纯文字表，或「文字列 + 图列」的组合网格",
+  "图宽等于列宽     图列越多每张越小；只有一列图列时最大",
+  "说明写进表头     单元格放不下说明时，表头行是该列唯一能写字的位置",
+  "只用纯 Markdown  不用任何 HTML 标签",
+  "路径用正斜杠 /   反斜杠在 Markdown 里是转义符",
+];
+
+/** 模板 T1 到 T5。看图时选一个，不要混用。 */
+const DISPLAY_TEMPLATES = [
+  "T1 图文流      图最大、每张带文字时用，不用表格",
+  "               <文字> 空行 ![](<路径>) 空行 <文字>",
+  "T2 文字加图列  文字与图并排、图仍要大",
+  "               | <文字> | <图> |",
+  "T3 一行多图    一行文字对多张图",
+  "               | <文字> | <图> | <图> |",
+  "T4 多图网格    多图同屏对比，文字放表头",
+  "               | <文字> | <文字> |  下一行每格一张图",
+  "T5 图加纯文字表 既要看细节又要清单，图逐张铺开、表格只放文字",
+];
+
+/** 选型一句话。 */
+const DISPLAY_PICK = [
+  "图最大每张带字 T1 / 文字与图并排 T2 / 一行文字对多图 T3",
+  "多图对比 T4 / 细节与清单并存 T5 / 一格内图文混排做不到，改 T1",
 ];
 
 export function registerTools(server) {
@@ -71,7 +112,7 @@ export function registerTools(server) {
       title: "批量生图 / 改图",
       description:
         "生成或修改图片。任务带 images 走图生图，不带走文生图，多任务自动并发。\n" +
-        "返回可直接粘贴的 Markdown 图片引用。参数不确定先调 imagegen_info。",
+        "返回可直接粘贴的 Markdown 图片引用。参数或排版不确定先调 info。",
       inputSchema: {
         jobs: z
           .array(jobSchema)
@@ -84,7 +125,7 @@ export function registerTools(server) {
         name: z.string().optional().describe("单任务简写：产物文件名。"),
         n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数。"),
         folder: z.string().optional().describe("所有任务的默认子目录。"),
-        output_dir: z.string().optional().describe("所有任务的默认输出根目录。"),
+        output_dir: z.string().optional().describe("所有任务的默认输出根目录，任意绝对路径。"),
         ratio: z.enum(RATIOS).optional().describe("所有任务的默认比例。"),
         resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档。"),
         size: z.enum(IMAGE_SIZES).optional().describe("所有任务的默认精确像素。"),
@@ -124,12 +165,12 @@ export function registerTools(server) {
   );
 
   server.registerTool(
-    "imagegen_info",
+    "info",
     {
-      title: "查用法与当前配置",
+      title: "查参数、输出位置与展示规范",
       description:
-        "返回用法速查、上游连通性、可用模型与默认输出目录。\n" +
-        "不确定参数怎么传、想确认上游是否在线、想知道图片落在哪，先调这个。",
+        "返回参数速查、输出位置规则、Markdown 展示规范与模板、当前配置与连通性。\n" +
+        "不确定参数怎么传、图片要放哪、多张图怎么排才不被渲染破坏，先调这个。",
       inputSchema: {},
     },
     async () => {
@@ -157,12 +198,24 @@ export function registerTools(server) {
           Math.round(MAX_REFERENCE_BYTES / 1024 / 1024) +
           "MB",
         "",
-        "usage",
-        ...USAGE,
-        "",
         "ratio       " + RATIOS.join("  "),
         "resolution  " + RESOLUTIONS.join("  ") + "  只对方形生效",
-        "size        " + IMAGE_SIZES.slice(1).join("  ") + "  非方形会变形",
+        "size        常用 1024x1024 2048x2048 2560x1440 3840x2160；非方形会变形",
+        "",
+        "params",
+        ...PARAMS,
+        "",
+        "output",
+        ...OUTPUT,
+        "",
+        "display",
+        ...DISPLAY_RULES,
+        "",
+        "templates",
+        ...DISPLAY_TEMPLATES,
+        "",
+        "pick",
+        ...DISPLAY_PICK,
       );
 
       return { content: text(lines.join("\n")) };

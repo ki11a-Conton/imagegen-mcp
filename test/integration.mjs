@@ -63,10 +63,12 @@ async function main() {
     const reference = join(workspace, "reference.png");
     await writeFile(reference, PNG_1X1);
 
-    await check("imagegen_info 报告上游可达与用法", async () => {
-      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
+    await check("info 报告上游可达与用法", async () => {
+      const text = textOf(await client.callTool({ name: "info", arguments: {} }));
       if (!text.includes("upstream  ok")) throw new Error("应报告上游可达: " + text);
-      if (!text.includes("usage")) throw new Error("应给出用法速查: " + text);
+      if (!text.includes("params")) throw new Error("应给出参数速查: " + text);
+      if (!text.includes("display")) throw new Error("应给出展示规范: " + text);
+      if (!text.includes("T1")) throw new Error("应给出排版模板: " + text);
       if (!text.includes("jobs<=8")) throw new Error("应报告上限: " + text);
     });
 
@@ -344,8 +346,8 @@ async function main() {
       if (bytes[0] !== 0x89 || bytes.subarray(1, 4).toString("latin1") !== "PNG") {
         throw new Error("落盘文件应是 PNG");
       }
-      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
-      if (!text.includes("output=")) throw new Error("imagegen_info 应报告输出目录");
+      const text = textOf(await client.callTool({ name: "info", arguments: {} }));
+      if (!text.includes("output=")) throw new Error("info 应报告输出目录");
     });
 
     await client.close();

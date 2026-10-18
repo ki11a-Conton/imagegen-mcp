@@ -174,7 +174,7 @@ await check("单张输出一行图片引用", () => {
   assert.match(text, /!\[三视图\.png\]\(<D:\/out\/三视图\.png>\)/);
 });
 
-await check("多张逐行给引用，并排只作为可选示例", () => {
+await check("多张逐行给引用，不预设排版", () => {
   const batch = sampleBatch();
   batch.results = [
     { ...batch.results[0], index: 0 },
@@ -187,11 +187,19 @@ await check("多张逐行给引用，并排只作为可选示例", () => {
   batch.jobs = [{ model: "gpt-image-2.5" }, { model: "gpt-image-2.5" }];
   const text = formatReport(batch, { root: "D:/out" });
 
-  // 每张各自独立成行，不强推表格。
+  // 每张各自独立成行。
   assert.match(text, /!\[三视图\.png\]\(<D:\/out\/三视图\.png>\)\n!\[四视图\.png\]/);
-  // 并排只是提示，不是主格式。
-  assert.match(text, /并排示例：\| /);
+  // 不塞表格、不塞示例，排版交给调用方按 info 工具里的模板决定。
+  assert.ok(!text.includes("| "));
   assert.ok(!text.includes("markdown (2 per row)"));
+});
+
+await check("图片引用路径统一用正斜杠", () => {
+  const batch = sampleBatch();
+  batch.results[0].files[0].path = "C:\\Users\\me\\out\\三视图.png";
+  const text = formatReport(batch, { root: "C:/Users/me/out" });
+  assert.match(text, /!\[三视图\.png\]\(<C:\/Users\/me\/out\/三视图\.png>\)/);
+  assert.ok(!text.includes("\\"));
 });
 
 await check("相对路径按边界裁剪，不吃掉相邻目录", () => {

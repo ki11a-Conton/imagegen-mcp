@@ -22,8 +22,9 @@
 
 - 改落盘逻辑 → 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 防错清单，补 selftest。
 - 改工具 schema → 同步 [../README.md](../README.md) 参数表；新增顶层默认参数必须同时进 `defaults`。
-- 改 `USAGE` 文案 → 那是 agent 唯一的用法入口，改完同步 [../README.md](../README.md) 参数表。
-- 改排版 → 补 selftest 的排版用例，注意中文双宽与多行错误。
+- 改 `PARAMS` / `OUTPUT` / `DISPLAY_*` 文案 → 那是 agent 唯一的用法与排版入口，改完同步 [../README.md](../README.md)。
+- 改排版 → 补 selftest 的排版用例，注意中文双宽、多行错误、路径正斜杠。
+- 改工具名 → 同步 [../install.ps1](../install.ps1) 收尾提示、[../README.md](../README.md)、[../AGENTS.md](../AGENTS.md)。
 - 改上游客户端 → 跑 integration，假上游覆盖 SSE、CRLF、回传原图三种情况。
 - 新增环境变量 → 同步 `config.mjs`、[../README.md](../README.md)、[../install.ps1](../install.ps1) 三处。
 
