@@ -77,7 +77,7 @@ export const IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flar
 
 /**
  * 尺寸只对方形真正生效。
- * 上游按自己的默认方形出图，非方形若强传像素会被本地 Lanczos 硬拉变形，
+ * 上游按自己的默认方形出图，非方形若强传像素会被服务端 Lanczos 硬拉变形，
  * 所以非方形改为把构图写进提示词，让上游自己出对应比例。
  */
 export const IMAGE_SIZES = [

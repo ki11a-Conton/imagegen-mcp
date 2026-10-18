@@ -14,7 +14,7 @@ export function resolveSize({ size, resolution, ratio } = {}) {
       composition: "",
       note: isSquare(explicit)
         ? ""
-        : `显式尺寸 ${explicit} 非方形：上游可能仍按方形出图再被本地放大硬拉，画面会变形。要自然横竖版请改用 ratio。`,
+        : `显式尺寸 ${explicit} 非方形：上游可能仍按方形出图再被服务端放大硬拉，画面会变形。要自然横竖版请改用 ratio。`,
     };
   }
 
