@@ -266,7 +266,7 @@ else {
 
 Write-Host ''
 Write-Step 'done'
-Write-Detail 'restart DSH, then tools create_images / imagegen_info are available'
+Write-Detail 'restart DSH, then tools create_images / info are available'
 Write-Detail ('default output: ' + (Join-Path $target 'output') + ' (use folder to categorize)')
 Write-Detail 'for 2K/4K enable image_upscale_enabled in chatgpt2api'
 

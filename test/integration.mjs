@@ -63,10 +63,12 @@ async function main() {
     const reference = join(workspace, "reference.png");
     await writeFile(reference, PNG_1X1);
 
-    await check("imagegen_info 报告上游可达与用法", async () => {
-      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
+    await check("info 报告上游可达与用法", async () => {
+      const text = textOf(await client.callTool({ name: "info", arguments: {} }));
       if (!text.includes("upstream  ok")) throw new Error("应报告上游可达: " + text);
-      if (!text.includes("usage")) throw new Error("应给出用法速查: " + text);
+      if (!text.includes("params")) throw new Error("应给出参数速查: " + text);
+      if (!text.includes("display")) throw new Error("应给出展示规范: " + text);
+      if (!text.includes("T1")) throw new Error("应给出排版模板: " + text);
       if (!text.includes("jobs<=8")) throw new Error("应报告上限: " + text);
     });
 
@@ -74,7 +76,7 @@ async function main() {
       const text = textOf(
         await client.callTool({
           name: "create_images",
-          arguments: { prompt: "一只兔子", ratio: "1:1", folder: "single", name: "one" },
+          arguments: { prompt: "一只兔子", ratio: "1:1", output: join(workspace, "single", "one.png") },
         }),
       );
       if (!text.includes("1/1 ok")) throw new Error("应成功 1 个任务: " + text);
@@ -90,9 +92,9 @@ async function main() {
             folder: "batch",
             concurrency: 3,
             jobs: [
-              { prompt: "白底三视图", name: "a" },
-              { prompt: "四视图", name: "b" },
-              { prompt: "换成雪山背景", images: [reference], name: "c" },
+              { prompt: "白底三视图", output: join(workspace, "batch", "a.png") },
+              { prompt: "四视图", output: join(workspace, "batch", "b.png") },
+              { prompt: "换成雪山背景", images: [reference], output: join(workspace, "batch", "c.png") },
             ],
           },
         }),
@@ -115,11 +117,11 @@ async function main() {
       if (entries.length !== 3) throw new Error("batch 目录应有 3 个文件，实际 " + entries.length);
     });
 
-    await check("name 指定文件名生效且不覆盖同名", async () => {
+    await check("output 指定文件名生效且不覆盖同名", async () => {
       const text = textOf(
         await client.callTool({
           name: "create_images",
-          arguments: { prompt: "同名第二次", folder: "batch", name: "a" },
+          arguments: { prompt: "同名第二次", output: join(workspace, "batch", "a.png") },
         }),
       );
       if (!text.includes("1/1 ok")) throw new Error("应成功: " + text);
@@ -172,7 +174,7 @@ async function main() {
       const text = textOf(
         await client.callTool({
           name: "create_images",
-          arguments: { prompt: "引用测试", folder: "md", name: "mdshot" },
+          arguments: { prompt: "引用测试", output: join(workspace, "md", "mdshot.png") },
         }),
       );
       if (!/!\[mdshot\.png\]\(<[^)]+mdshot\.png>\)/.test(text)) {
@@ -200,25 +202,21 @@ async function main() {
           jobs: [
             {
               prompt: "任务一 纯文生图",
-              output_dir: dirA,
+              output: join(dirA, "one.png"),
               ratio: "16:9",
-              name: "one",
               model: "gpt-image-2",
             },
             {
               prompt: "任务二 参考图 A",
               images: [referenceA],
-              output_dir: dirB,
+              output: join(dirB, "two.png"),
               ratio: "9:16",
-              name: "two",
               model: "gpt-image-2.5",
             },
             {
               prompt: "任务三 两张参考图",
               images: [referenceA, referenceB],
-              output_dir: dirB,
-              folder: "nested/deep",
-              name: "three",
+              output: join(dirB, "nested", "deep", "three.png"),
               n: 2,
             },
           ],
@@ -247,13 +245,18 @@ async function main() {
       if (!two.prompt.includes("9:16")) throw new Error("任务二提示词应含 9:16");
       if (three.n !== 2) throw new Error("任务三张数应独立: " + three.n);
 
-      // 输出路径：任务级 output_dir 生效；folder 可继承也可覆盖。
-      const filesA = await readdir(join(dirA, "shared")).catch(() => []);
-      const filesB = await readdir(join(dirB, "shared")).catch(() => []);
-      const filesC = await readdir(join(dirB, "nested", "deep")).catch(() => []);
+      // 输出路径：任务级 output 各自独立，父目录自动创建。
+      const onlyFiles = async (dir) =>
+        (await readdir(dir, { withFileTypes: true }).catch(() => []))
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
 
-      if (filesA.length !== 1) throw new Error("任务一应落到 dirA/shared，实际 " + filesA.length);
-      if (filesB.length !== 1) throw new Error("任务二应落到 dirB/shared，实际 " + filesB.length);
+      const filesA = await onlyFiles(dirA);
+      const filesB = await onlyFiles(dirB);
+      const filesC = await onlyFiles(join(dirB, "nested", "deep"));
+
+      if (filesA.length !== 1) throw new Error("任务一应落到 dirA，实际 " + filesA.length);
+      if (filesB.length !== 1) throw new Error("任务二应落到 dirB，实际 " + filesB.length);
       if (filesC.length !== 2) throw new Error("任务三应落到嵌套目录且 2 张，实际 " + filesC.length);
 
       if (!filesA[0].startsWith("one")) throw new Error("任务一文件名应为 one，实际 " + filesA[0]);
@@ -344,8 +347,8 @@ async function main() {
       if (bytes[0] !== 0x89 || bytes.subarray(1, 4).toString("latin1") !== "PNG") {
         throw new Error("落盘文件应是 PNG");
       }
-      const text = textOf(await client.callTool({ name: "imagegen_info", arguments: {} }));
-      if (!text.includes("output=")) throw new Error("imagegen_info 应报告输出目录");
+      const text = textOf(await client.callTool({ name: "info", arguments: {} }));
+      if (!text.includes("output=")) throw new Error("info 应报告输出目录");
     });
 
     await client.close();

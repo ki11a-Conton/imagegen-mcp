@@ -11,7 +11,7 @@
 import { DEFAULT_CONCURRENCY, DEFAULT_MODEL, MAX_CONCURRENCY, MAX_GLOBAL_CONCURRENCY } from "./config.mjs";
 import { resolveSize, withComposition } from "./size.mjs";
 import { callUpstream } from "./upstream.mjs";
-import { referenceHash, resolveOutputDir, saveResultItems, toImageReference } from "./storage.mjs";
+import { referenceHash, resolveTargetFile, saveResultItems, toImageReference } from "./storage.mjs";
 
 // --- 进程级并发闸门 ---
 
@@ -58,6 +58,11 @@ function normalizeJob(raw, defaults, index) {
   );
 
   const size = resolveSize({ size: job.size, resolution: job.resolution, ratio: job.ratio });
+  const target = resolveTargetFile({
+    output: job.output,
+    output_dir: job.output_dir,
+    folder: job.folder,
+  });
 
   return {
     index,
@@ -69,8 +74,8 @@ function normalizeJob(raw, defaults, index) {
     sizeNote: size.note,
     quality: job.quality && job.quality !== "auto" ? job.quality : "",
     n: job.n || 1,
-    name: String(job.name ?? "").trim(),
-    dir: resolveOutputDir({ output_dir: job.output_dir, folder: job.folder }),
+    targetFile: target.file,
+    dir: target.dir,
   };
 }
 
@@ -99,9 +104,9 @@ async function runJob(job) {
     );
 
     const { saved, items } = await saveResultItems(result, {
+      targetFile: job.targetFile,
       dir: job.dir,
       prefix: job.route === "edit" ? "edited" : "image",
-      name: job.name,
     });
 
     // 上游偶尔把参考图原样回传，逐字节比对能识别出来。

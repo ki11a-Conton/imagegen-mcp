@@ -29,8 +29,20 @@ export const TIMEOUT_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 600_000;
 })();
 
-/** 默认落盘根目录：项目根目录下的 output/。可用 output_dir 参数逐次覆盖。 */
+/** 默认落盘根目录：项目根目录下的 output/。任务可用 output 或 output_dir 覆盖。 */
 export const OUTPUT_ROOT = resolve(process.env.IMAGEGEN_OUTPUT_DIR || join(PROJECT_ROOT, "output"));
+
+/**
+ * 网关类错误（502 / 503 / 504 / 524）的重试次数与退避基数。
+ *
+ * 524 是反向代理的源站超时，属瞬时过载，重试往往就好了；
+ * 但图生图本身要 2 到 6 分钟，重试次数不能大，否则一次调用拖太久。
+ */
+export const MAX_RETRIES = (() => {
+  const parsed = Number(process.env.IMAGEGEN_MAX_RETRIES);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 2;
+})();
+export const RETRY_BASE_MS = 5_000;
 
 /** 一次工具调用里最多几个任务。 */
 export const MAX_JOBS = 8;

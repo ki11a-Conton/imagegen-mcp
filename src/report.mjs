@@ -35,22 +35,22 @@ const relTo = (path, root) => {
   return target.startsWith(prefix) ? target.slice(prefix.length) : target;
 };
 
-/** 路径用尖括号包住，中文与空格都不会破坏 Markdown 语法。 */
-const imageRef = (file) => `![${basename(file.path)}](<${file.path}>)`;
+/**
+ * 图片引用。
+ * - 路径统一转正斜杠：反斜杠在 Markdown 里是转义符。
+ * - 外面包尖括号：中文、空格、括号都不会破坏语法。
+ */
+const imageRef = (file) => {
+  const path = String(file.path).replaceAll("\\", "/");
+  return `![${basename(path)}](<${path}>)`;
+};
 
 /**
  * 每张一行给引用，不预设排版。
- * 想看并排就自己包一层表格，单张就直接发一行。
+ * 排版模板由 info 的 display 段提供，返回里不塞示例，保持干净。
  */
 function markdownBlock(files) {
-  if (files.length === 0) return [];
-
-  const lines = files.map(imageRef);
-  if (files.length > 1) {
-    const sample = files.slice(0, 2).map(imageRef).join(" | ");
-    lines.push("", `并排示例：| ${sample} |`);
-  }
-  return lines;
+  return files.map(imageRef);
 }
 
 /** 等宽列对齐，最后一列自由宽度。 */
@@ -116,7 +116,9 @@ export function formatReport(batch, { root } = {}) {
     lines.push(
       "",
       "paths:",
-      ...files.map((file) => `  ${file.path}  (${fmtDims(file)}, ${fmtBytes(file.bytes)})`),
+      ...files.map(
+        (file) => `  ${String(file.path).replaceAll("\\", "/")}  (${fmtDims(file)}, ${fmtBytes(file.bytes)})`,
+      ),
     );
   }
 
