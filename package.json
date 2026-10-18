@@ -1,6 +1,6 @@
 {
   "name": "imagegen-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "MCP server that exposes chatgpt2api image generation and editing to DSH, with batched jobs, automatic routing and automatic concurrency. Streams SSE so it also works behind Cloudflare tunnels.",
   "type": "module",
   "bin": {

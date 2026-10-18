@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { IMAGE_MIME_BY_EXT, MAX_REFERENCE_BYTES, OUTPUT_ROOT } from "./config.mjs";
 
@@ -122,23 +122,33 @@ function timestamp() {
 }
 
 /**
- * 独占创建，绝不覆盖已有文件。
- * 有 name 就优先用它（先净化文件名），撞名退化成 name-2 / name-3。
+ * 解析任务的目标文件。
+ *
+ * - 给了 output：按绝对文件路径走，父目录自动创建。相对路径按默认根解析。
+ *   这就是「任务自带文件名」，落盘后不需要再重命名。
+ * - 没给 output：落到默认目录，自动命名。
+ *
+ * 返回 { file, dir }：file 为空表示用自动命名。
  */
-export async function writeNewFile(dir, { name, prefix, index, ext }, buffer) {
-  const safeName = sanitizeName(name);
+export function resolveTargetFile({ output, output_dir, folder } = {}) {
+  const dir = resolveOutputDir({ output_dir, folder });
+  const wanted = String(output ?? "").trim();
+  if (!wanted) return { file: "", dir };
 
-  const baseName = (attempt) => {
-    if (!safeName) return `${prefix}-${timestamp()}-${index + 1}-${randomUUID().slice(0, 8)}`;
-    return attempt === 0 ? safeName : `${safeName}-${attempt + 1}`;
-  };
+  const file = resolve(wanted);
+  return { file, dir: dirname(file) };
+}
+
+/**
+ * 独占创建，绝不覆盖已有文件。
+ * 撞名自动退化成 name-2 / name-3。
+ */
+export async function writeUnique(dir, baseName, ext, buffer) {
+  await mkdir(dir, { recursive: true });
 
   for (const attempt of Array.from({ length: 12 }, (_, i) => i)) {
-    const target = join(dir, `${baseName(attempt)}${ext}`);
-    // 双保险：净化之后再确认结果确实在目标目录内。
-    if (!target.startsWith(resolve(dir) + "\\") && !target.startsWith(resolve(dir) + "/")) {
-      throw new Error(`文件名越界，拒绝写入：${name}`);
-    }
+    const name = attempt === 0 ? baseName : `${baseName}-${attempt + 1}`;
+    const target = join(dir, `${name}${ext}`);
     try {
       await writeFile(target, buffer, { flag: "wx" });
       return target;
@@ -150,8 +160,17 @@ export async function writeNewFile(dir, { name, prefix, index, ext }, buffer) {
   throw new Error(`无法在 ${dir} 生成不冲突的文件名（同名重试 12 次仍冲突）`);
 }
 
+/** 把调用方给的文件路径拆成目录与主干名，扩展名以实际字节为准。 */
+function splitTarget(file) {
+  const ext = extname(file);
+  return {
+    dir: dirname(file),
+    stem: sanitizeName(basename(file, ext)) || "image",
+  };
+}
+
 /** 单张落盘。b64_json 与 url 两种来源都支持。 */
-async function saveOne(item, { dir, prefix, index, name }) {
+async function saveOne(item, { targetFile, dir, prefix, index }) {
   const b64 = String(item?.b64_json ?? "").trim();
 
   const { buffer, sourceUrl } = await (async () => {
@@ -168,8 +187,22 @@ async function saveOne(item, { dir, prefix, index, name }) {
   if (!buffer) return null;
 
   const ext = extFromBuffer(buffer) || ".png";
-  const suffix = index > 0 && name ? `${name}-${index + 1}` : name;
-  const path = await writeNewFile(dir, { name: suffix, prefix, index, ext }, buffer);
+
+  // 显式路径：n 大于 1 时派生 主干-2、主干-3。
+  const { baseDir, baseName } = targetFile
+    ? (() => {
+        const parts = splitTarget(targetFile);
+        return {
+          baseDir: parts.dir,
+          baseName: index === 0 ? parts.stem : `${parts.stem}-${index + 1}`,
+        };
+      })()
+    : {
+        baseDir: dir,
+        baseName: `${prefix}-${timestamp()}-${index + 1}-${randomUUID().slice(0, 8)}`,
+      };
+
+  const path = await writeUnique(baseDir, baseName, ext, buffer);
   const size = imageSize(buffer);
 
   return {
@@ -182,18 +215,19 @@ async function saveOne(item, { dir, prefix, index, name }) {
   };
 }
 
-/** 把上游返回的 data[] 全部落盘。 */
-export async function saveResultItems(result, { dir, prefix = "image", name } = {}) {
+/**
+ * 把上游返回的 data[] 全部落盘。
+ * targetFile 为空时按 dir 自动命名。
+ */
+export async function saveResultItems(result, { targetFile = "", dir, prefix = "image" } = {}) {
   const items = Array.isArray(result?.data) ? result.data : [];
   if (items.length === 0) {
     throw new Error(`上游没有返回图片数据：${JSON.stringify(result).slice(0, 300)}`);
   }
 
-  await mkdir(dir, { recursive: true });
-
   const saved = [];
   for (const [index, item] of items.entries()) {
-    const file = await saveOne(item, { dir, prefix, index, name });
+    const file = await saveOne(item, { targetFile, dir, prefix, index });
     if (file) saved.push(file);
   }
 

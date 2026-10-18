@@ -48,13 +48,15 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 并发分两层：单次调用一个 worker 池（默认 3 路），整个进程再有一个在途闸门（默认 4 路）。
 - 两层并发保证「N 个 agent 各调 1 次」与「1 个 agent 调 1 次带 N 组任务」对上游压力一致。
 - 单任务失败收敛成 `{ ok: false }`，不中断整批；归一化失败也不连累其他任务。
-- 输出默认 `<项目根>/output`；`output_dir` 可以是任意绝对路径，指哪落哪，不追加子目录。
-- `folder` 是输出根下的相对子目录，`name` 定名，重名退化为 `-2` `-3`。
+- 输出默认 `<项目根>/output`。任务可给 `output`（完整绝对文件路径，含扩展名）直接定名定址。
+- 没给 `output` 时用 `output_dir` 加 `folder`，文件名自动生成。
+- 每个任务的输出互相独立，同一批里各写各的。`n` 大于 1 时派生 `-2` `-3`。
+- 重名不覆盖：同名已存在时自动加 `-2` `-3`。
 - 上游回传原图时按 sha256 逐字节识别，在返回里告警，避免被当成「已改好」。
 
 ## 防错清单
 
-- 改 `storage.mjs` 的 `writeNewFile` 前先想清并发语义：必须保留 `flag: "wx"` 与重试。
+- 改 `storage.mjs` 的 `writeUnique` 前先想清并发语义：必须保留 `flag: "wx"` 与重试。
 - 改 `upstream.mjs` 的 SSE 解析要保留 CRLF 归一。有些代理发 `\r\n\r\n`，只按 `\n\n` 切会完全切不开。
 - 改 `report.mjs` 时文件名必须留在最后一列。中文是双宽字符，放中间会把 ASCII 列的对齐撑歪。
 - 表格式返回里的错误文本要先压成单行，多行报错会把表格撑破。
@@ -68,6 +70,7 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 任务之间完全独立：参考图、模型、比例、张数、输出目录、文件名逐任务生效。
 - 工具描述只写「何时用」与最容易踩的一条，具体技巧放 `info` 的输出里。
 - 展示规范以 `info` 的 `display` 段为准：图片独立成段、一格只放一个元素、图文相邻不用表格、说明写表头、只用纯 Markdown。
-- `env` 只认六个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`。
+- `env` 只认七个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`、`IMAGEGEN_MAX_RETRIES`。
+- 网关类错误（502 503 504 524）必须走重试，且错误文本要压成一行：网关返回整页 HTML，原样塞进返回会撑爆表格。
 - 单张参考图上限 30MB（服务端硬上限 50MB，base64 还有约 1/3 膨胀）。
 - 文件名扩展名由字节魔数决定，不信任上游声称的格式。

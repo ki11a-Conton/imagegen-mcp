@@ -38,18 +38,25 @@ const jobSchema = z.object({
     .max(16)
     .optional()
     .describe("参考图路径，最多 16 张。给了走图生图，不给走文生图。多图时第一张是被改的主体。"),
-  name: z.string().optional().describe("产物文件名，不含扩展名。重名自动加 -2，不会覆盖。"),
+  output: z
+    .string()
+    .optional()
+    .describe(
+      "输出文件的完整绝对路径，含文件名与扩展名，例如 E:/图/兔子/三视图.png。" +
+        "父目录自动创建，落盘后不需要再重命名。n 大于 1 时派生 三视图-2.png、三视图-3.png。" +
+        "同名已存在时自动加 -2，不覆盖。省略则落到默认目录并自动命名。",
+    ),
   n: z.number().int().min(1).max(4).optional().describe("这一组出几张，默认 1。"),
   ratio: z.enum(RATIOS).optional().describe("画面比例，默认 1:1。横竖版用它，不要用 size。"),
   resolution: z.enum(RESOLUTIONS).optional().describe("清晰度档，只对方形生效。"),
   size: z.enum(IMAGE_SIZES).optional().describe("精确像素。只有用户点名像素时用，非方形会变形。"),
   quality: qualityEnum.optional().describe("质量档。上游无差异，一般不用传。"),
   model: z.enum(IMAGE_MODELS).optional().describe("图片模型。四个名字在上游同一个 auto 路由。"),
-  folder: z.string().optional().describe("输出根目录下的子目录，支持 a/b 多级。"),
+  folder: z.string().optional().describe("未给 output 时的分类子目录，相对默认输出根，支持 a/b 多级。"),
   output_dir: z
     .string()
     .optional()
-    .describe("绝对路径，指哪落哪，不会追加子目录。默认 <项目根>/output，只是缺省值。"),
+    .describe("未给 output 时的输出根目录，绝对路径。默认 <项目根>/output，只是缺省值。"),
 });
 
 // 用法与排版规范。放在查询工具的输出里，而不是塞进工具描述：
@@ -64,14 +71,18 @@ const PARAMS = [
   '横竖版      ratio: "16:9" 或 "9:16"     不要用 size，会变形',
   '清晰度      resolution: "2k"            只对方形生效',
   "同题多张    n: 2 到 4",
+  "重活降并发  多张大参考图的图生图很重，并发降到 1 到 2 更稳",
+  "自动重试    502 / 503 / 504 / 524 会退避重试，仍失败就是上游过载",
 ];
 
-/** 输出位置。默认只是默认，不是限制。 */
+/** 输出位置。每个任务独立，默认只是缺省值，不是限制。 */
 const OUTPUT = [
-  "默认        <项目根>/output，仅作为缺省值",
-  '换位置      output_dir: "E:/任意/绝对/路径"  指哪落哪，不追加子目录',
-  '分类        folder: "rabbit/refs"            相对输出根，不要写绝对路径',
-  '文件名      name: "三视图"                   重名自动加 -2，不会覆盖',
+  '指定文件    output: "E:/图/兔子/三视图.png"  完整绝对路径，父目录自动建',
+  "多张        n 大于 1 时派生 三视图-2.png、三视图-3.png",
+  '只定目录    output_dir: "E:/图" 加 folder: "兔子"  仍自动命名',
+  "默认        <项目根>/output 自动命名，仅作缺省值",
+  "不覆盖      同名已存在时自动加 -2",
+  "独立性      output 逐任务生效，同一批里各写各的",
 ];
 
 /** 展示规范。图片怎么排才不会被渲染破坏。 */
@@ -122,9 +133,9 @@ export function registerTools(server) {
           .describe("任务数组，最多 " + MAX_JOBS + " 个。只有一个任务时改用顶层 prompt 简写。"),
         prompt: z.string().optional().describe("单任务简写：画什么。仅在 jobs 为空时生效。"),
         images: z.array(z.string()).max(16).optional().describe("单任务简写：参考图路径。"),
-        name: z.string().optional().describe("单任务简写：产物文件名。"),
+        output: z.string().optional().describe("单任务简写：输出文件完整绝对路径，含文件名。"),
         n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数。"),
-        folder: z.string().optional().describe("所有任务的默认子目录。"),
+        folder: z.string().optional().describe("所有任务的默认分类子目录。"),
         output_dir: z.string().optional().describe("所有任务的默认输出根目录，任意绝对路径。"),
         ratio: z.enum(RATIOS).optional().describe("所有任务的默认比例。"),
         resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档。"),
@@ -156,7 +167,7 @@ export function registerTools(server) {
         Array.isArray(args.jobs) && args.jobs.length > 0
           ? args.jobs
           : args.prompt
-            ? [{ prompt: args.prompt, images: args.images, name: args.name }]
+            ? [{ prompt: args.prompt, images: args.images, output: args.output }]
             : [];
 
       const batch = await runJobs(rawJobs, defaults, args.concurrency);

@@ -3,7 +3,7 @@
 // 必须流式：上游先发 heartbeat 注释帧保活再出图。经 Cloudflare 免费版那种
 // 源站 100 秒超时的反向代理时，非流式要等整张图生成完才回响应头，一超 100 秒必被掐成 524。
 
-import { API_KEY, BASE_URL, TIMEOUT_MS } from "./config.mjs";
+import { API_KEY, BASE_URL, MAX_RETRIES, RETRY_BASE_MS, TIMEOUT_MS } from "./config.mjs";
 
 /**
  * 把一帧 SSE 解析成对象。
@@ -92,8 +92,41 @@ async function readImageSse(response) {
   return { object: "list", created, data: items, usage };
 }
 
+/** 网关类错误码，属瞬时过载，可重试。 */
+const RETRYABLE = new Set([502, 503, 504, 524]);
+
 /**
- * 调一次 chatgpt2api。
+ * 把上游错误响应压成一行可读原因。
+ * 网关会返回整页 HTML，直接塞进返回会把表格撑爆，也没人看得懂。
+ */
+export function describeHttpError(status, body) {
+  const text = String(body ?? "");
+
+  // Cloudflare 的 5xx 页面里 <title> 就是人话原因。
+  const title = text.match(/<title>([^<]{1,120})<\/title>/i)?.[1];
+  if (title) return `HTTP ${status}：${title.replace(/\s+/g, " ").trim()}`;
+
+  // 上游自己的 JSON 错误。
+  try {
+    const parsed = JSON.parse(text);
+    const message = parsed?.error?.message ?? parsed?.message;
+    if (message) return `HTTP ${status}：${String(message).slice(0, 160)}`;
+  } catch {
+    // 不是 JSON，继续按纯文本处理
+  }
+
+  const plain = text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return plain ? `HTTP ${status}：${plain.slice(0, 160)}` : `HTTP ${status}`;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 调一次 chatgpt2api，网关类错误自动重试。
  * @param {object} payload 请求体，会自动补 stream:true
  * @param {string} path    /images/generations 或 /images/edits
  */
@@ -104,6 +137,26 @@ export async function callUpstream(payload, path) {
     );
   }
 
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    if (attempt > 0) await sleep(RETRY_BASE_MS * attempt);
+    try {
+      return await callOnce(payload, path);
+    } catch (error) {
+      lastError = error;
+      if (!error?.retryable) throw error;
+    }
+  }
+
+  throw new Error(
+    `${lastError.message}（已重试 ${MAX_RETRIES} 次仍失败，多为上游瞬时过载，稍后再试或降低并发）`,
+    {
+      cause: lastError,
+    },
+  );
+}
+
+async function callOnce(payload, path) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -121,7 +174,10 @@ export async function callUpstream(payload, path) {
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`chatgpt2api ${response.status}: ${body.slice(0, 400)}`);
+      const error = new Error(describeHttpError(response.status, body));
+      error.status = response.status;
+      error.retryable = RETRYABLE.has(response.status);
+      throw error;
     }
 
     // 前置代理把响应体缓冲成 JSON 时的兜底。

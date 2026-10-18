@@ -7,7 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { resolveSize, withComposition } from "../src/size.mjs";
-import { extFromBuffer, imageSize, resolveOutputDir, sanitizeName, writeNewFile } from "../src/storage.mjs";
+import {
+  extFromBuffer,
+  imageSize,
+  resolveOutputDir,
+  resolveTargetFile,
+  sanitizeName,
+  writeUnique,
+} from "../src/storage.mjs";
 import { formatReport } from "../src/report.mjs";
 
 let passed = 0;
@@ -115,12 +122,31 @@ await check("过短或不认识的 buffer 返回 null", () => {
   assert.equal(imageSize(Buffer.from("plain text content here")), null);
 });
 
+// --- 目标文件解析 ---
+await check("output 给了绝对路径就照用，目录取父级", () => {
+  const target = resolveTargetFile({ output: "E:/图/兔子/三视图.png" });
+  assert.match(target.file.replaceAll("\\", "/"), /E:\/图\/兔子\/三视图\.png$/);
+  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子$/);
+});
+
+await check("没有 output 时落到默认目录并自动命名", () => {
+  const target = resolveTargetFile({ folder: "rabbit" });
+  assert.equal(target.file, "");
+  assert.match(target.dir.replaceAll("\\", "/"), /output\/rabbit$/);
+});
+
+await check("output_dir 与 folder 组合仍可用", () => {
+  const target = resolveTargetFile({ output_dir: "C:/tmp/out", folder: "a/b" });
+  assert.equal(target.file, "");
+  assert.match(target.dir.replaceAll("\\", "/"), /C:\/tmp\/out\/a\/b$/);
+});
+
 // --- 落盘去重 ---
 await check("同名不覆盖，自动加后缀", async () => {
   const dir = await mkdtemp(join(tmpdir(), "imagegen-selftest-"));
   try {
-    const first = await writeNewFile(dir, { name: "shot", ext: ".png" }, Buffer.from("a"));
-    const second = await writeNewFile(dir, { name: "shot", ext: ".png" }, Buffer.from("b"));
+    const first = await writeUnique(dir, "shot", ".png", Buffer.from("a"));
+    const second = await writeUnique(dir, "shot", ".png", Buffer.from("b"));
     assert.match(first, /shot\.png$/);
     assert.match(second, /shot-2\.png$/);
   } finally {
@@ -128,25 +154,10 @@ await check("同名不覆盖，自动加后缀", async () => {
   }
 });
 
-await check("恶意 name 不会写出目标目录", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "imagegen-selftest-"));
-  try {
-    const path = await writeNewFile(dir, { name: "../../escaped", ext: ".png" }, Buffer.from("x"));
-    assert.ok(path.startsWith(dir));
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-await check("不给 name 时文件名带随机量", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "imagegen-selftest-"));
-  try {
-    const first = await writeNewFile(dir, { prefix: "image", index: 0, ext: ".png" }, Buffer.from("a"));
-    const second = await writeNewFile(dir, { prefix: "image", index: 0, ext: ".png" }, Buffer.from("b"));
-    assert.notEqual(first, second);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+await check("文件名净化去掉路径分隔符与非法字符", () => {
+  assert.equal(sanitizeName("../../escaped"), "escaped");
+  assert.equal(sanitizeName('bad:name?*"<>|'), "badname");
+  assert.equal(sanitizeName("...hidden..."), "hidden");
 });
 
 // --- 报表排版 ---

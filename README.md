@@ -56,8 +56,8 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 ```jsonc
 {
   "jobs": [
-    { "prompt": "白底三视图，橘黄兔子的左侧面、正面、右侧面", "ratio": "16:9", "folder": "rabbit", "name": "三视图" },
-    { "prompt": "把背景换成雪山日落，主体和构图不变", "images": ["D:/refs/rabbit.jpg"], "folder": "rabbit", "name": "雪山" }
+    { "prompt": "白底三视图，橘黄兔子的左侧面、正面、右侧面", "ratio": "16:9", "output": "E:/图/兔子/三视图.png" },
+    { "prompt": "把背景换成雪山日落，主体和构图不变", "images": ["D:/refs/rabbit.jpg"], "output": "E:/图/兔子/雪山.png" }
   ],
   "concurrency": 3
 }
@@ -68,9 +68,10 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 | 参数 | 说明 |
 | --- | --- |
 | `jobs` | 任务数组，最多 8 个，并发执行 |
-| `prompt` / `images` / `name` | 只有一个任务时的顶层简写 |
-| `folder` | 输出根下的子目录，支持 `a/b` 多级，写相对路径 |
-| `output_dir` | 绝对路径，指哪落哪，不会自动追加子目录 |
+| `prompt` / `images` / `output` | 只有一个任务时的顶层简写 |
+| `output` | 输出文件的完整绝对路径，含文件名与扩展名；父目录自动创建 |
+| `folder` | 未给 `output` 时的分类子目录，相对输出根，支持 `a/b` 多级 |
+| `output_dir` | 未给 `output` 时的输出根目录，绝对路径 |
 | `ratio` | `1:1` `16:9` `9:16` `4:3` `3:4` `3:2` `2:3` |
 | `resolution` | `1k` `2k` `4k`，只对方形真正生效 |
 | `size` | 精确像素，用户点名像素时才用 |
@@ -79,7 +80,10 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 | `model` | 图片模型，四个名字在上游是同一个 auto 路由 |
 | `concurrency` | 单次调用的并发，默认 3，上限 6 |
 
-任务级字段：`prompt` `images` `name` `n` `ratio` `resolution` `size` `quality` `model` `folder` `output_dir`。
+任务级字段：`prompt` `images` `output` `n` `ratio` `resolution` `size` `quality` `model` `folder` `output_dir`。
+
+每个任务的 `output` 互相独立，同一批里各写各的目录与文件名。
+`n` 大于 1 时自动派生 `三视图-2.png`、`三视图-3.png`。
 
 ### info
 
@@ -106,16 +110,20 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 
 ## 输出目录
 
-默认 `<项目根>/output/`，这只是缺省值。要放到本机任何地方，直接给绝对路径，指哪落哪，不追加子目录。
+默认 `<项目根>/output/`，这只是缺省值，不是限制。要放到本机任何地方，直接给绝对路径。
 
-`output/` 已在 `.gitignore` 里。三层优先级由低到高：
+两种写法，优先级由高到低：
 
-1. 环境变量 `IMAGEGEN_OUTPUT_DIR`
-2. 工具参数 `output_dir`
-3. 任务级 `output_dir`
+1. `output`：完整文件路径，含文件名与扩展名，例如 `E:/图/兔子/三视图.png`。
+   父目录自动创建，落盘后不需要再重命名。`n` 大于 1 时派生 `三视图-2.png`、`三视图-3.png`。
+2. `output_dir` 加 `folder`：只定目录，文件名自动生成。
 
-用 `folder` 分类，例如 `folder: "rabbit/refs"` 落到 `output/rabbit/refs/`。
-文件名用 `name` 指定，不给则自动命名；重名自动加 `-2` `-3`。
+`output` 逐任务生效，同一批里每个任务各写各的目录与文件名。
+
+`output/` 已在 `.gitignore` 里。不给 `output` 时目录优先级由低到高：
+环境变量 `IMAGEGEN_OUTPUT_DIR`、工具参数 `output_dir`、任务级 `output_dir`。
+
+重名不会覆盖：同名已存在时自动加 `-2` `-3`。
 
 ## 环境变量
 
@@ -126,6 +134,7 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | `IMAGEGEN_OUTPUT_DIR` | `<项目根>/output` | 输出根目录 |
 | `IMAGEGEN_DEFAULT_MODEL` | `gpt-image-2.5` | 默认模型 |
 | `IMAGEGEN_TIMEOUT_MS` | `600000` | 我们这边放弃等待的时间，写错时回落默认值 |
+| `IMAGEGEN_MAX_RETRIES` | `2` | 网关类错误（502 503 504 524）的重试次数，0 表示不重试 |
 | `IMAGEGEN_MAX_CONCURRENCY` | `4` | 整个进程同时在途的上游请求上限 |
 
 ## 哪些能调，哪些由服务端决定
@@ -140,7 +149,9 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | 每组张数 | `n` | 1 到 4 |
 | 我们这边等多久 | `IMAGEGEN_TIMEOUT_MS` | 默认 600 秒 |
 | MCP 客户端等多久 | DSH 的 `toolCallTimeoutMs` | 默认配 660 秒 |
-| 输出目录、文件名、分类 | `output_dir` `name` `folder` | 逐次或逐任务覆盖 |
+| 网关类错误重试几次 | `IMAGEGEN_MAX_RETRIES` | 默认 2，只对 502 503 504 524 生效 |
+| 输出文件路径 | `output` | 逐任务给完整绝对路径 |
+| 输出目录与分类 | `output_dir` `folder` | 不给 `output` 时用 |
 
 ### 服务端说了算
 
@@ -151,6 +162,10 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | 实际分辨率 | 上游自己决定 | 请求 `1024x1024` 实得 `1254x1254` |
 | 每组回几张 | 上游 | 有时多回一张候选，落盘会全部保留 |
 | 是否回传原图 | 上游 | 偶尔把参考图原样当结果，返回里会告警 |
+| 会不会 524 | 反向代理与上游负载 | 重活并发高时容易触发，代码会自动退避重试 |
+
+图生图带多张大参考图时，请求体很大（三张 1.7MB 的图 base64 后约 7MB）。
+这种任务并发降到 1 到 2 明显更稳。
 
 **关键**：我们的超时比服务端大，所以实际生效的是服务端那个。
 单张超过服务端 deadline 会先收到 503，调 `IMAGEGEN_TIMEOUT_MS` 不解决问题。
