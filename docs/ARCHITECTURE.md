@@ -43,12 +43,13 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 
 每条的背景与替代方案见 `.agents/notes/`。
 
-- 工具收敛为 `create_images` 与 `list_models` 两个，批量与单次走同一条路径。
+- 工具收敛为 `create_images`（执行）与 `imagegen_info`（查询）两个，批量与单次走同一条路径。
 - 自动路由：任务带 `images` 走 `/images/edits`，不带走 `/images/generations`。
 - 并发分两层：单次调用一个 worker 池（默认 3 路），整个进程再有一个在途闸门（默认 4 路）。
 - 两层并发保证「N 个 agent 各调 1 次」与「1 个 agent 调 1 次带 N 组任务」对上游压力一致。
 - 单任务失败收敛成 `{ ok: false }`，不中断整批；归一化失败也不连累其他任务。
-- 输出默认 `<项目根>/output`，`folder` 分类、`name` 定名，重名退化为 `-2` `-3`。
+- 输出默认 `<项目根>/output`；`output_dir` 可以是任意绝对路径，指哪落哪，不追加子目录。
+- `folder` 是输出根下的相对子目录，`name` 定名，重名退化为 `-2` `-3`。
 - 上游回传原图时按 sha256 逐字节识别，在返回里告警，避免被当成「已改好」。
 
 ## 防错清单
@@ -62,7 +63,10 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 
 ## 契约
 
-- 工具返回是纯文本 Markdown：表格 + 相对路径 + 绝对路径清单 + 可直接粘贴的图片引用。
+- 工具返回是纯文本 Markdown：表格 + 图片引用 + 绝对路径清单。
+- 图片引用每张一行，排版不强制；并排只作示例提示。
+- 任务之间完全独立：参考图、模型、比例、张数、输出目录、文件名逐任务生效。
+- 工具描述只写「何时用」与最容易踩的一条，具体技巧放 `imagegen_info` 的输出里。
 - `env` 只认六个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`。
 - 单张参考图上限 30MB（服务端硬上限 50MB，base64 还有约 1/3 膨胀）。
 - 文件名扩展名由字节魔数决定，不信任上游声称的格式。

@@ -30,7 +30,7 @@ async function readBody(request) {
  * @returns {Promise<{ url: string, close: () => Promise<void>, stats: object }>}
  */
 export async function startMockUpstream({ delayMs = 0 } = {}) {
-  const stats = { generations: 0, edits: 0, peakConcurrent: 0, active: 0 };
+  const stats = { generations: 0, edits: 0, peakConcurrent: 0, active: 0, payloads: [] };
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -55,6 +55,18 @@ export async function startMockUpstream({ delayMs = 0 } = {}) {
     stats.peakConcurrent = Math.max(stats.peakConcurrent, stats.active);
     if (isGenerate) stats.generations += 1;
     else stats.edits += 1;
+
+    // 记录每个请求的实际参数，供测试断言「任务之间互不干扰」。
+    stats.payloads.push({
+      route: isGenerate ? "gen" : "edit",
+      prompt: typeof body.prompt === "string" ? body.prompt : "",
+      model: body.model ?? "",
+      n: body.n ?? 1,
+      size: body.size ?? "",
+      quality: body.quality ?? "",
+      imageCount: Array.isArray(body.images) ? body.images.length : 0,
+      imageHashes: Array.isArray(body.images) ? body.images.map((item) => String(item).slice(-24)) : [],
+    });
 
     response.writeHead(200, {
       "content-type": "text/event-stream",

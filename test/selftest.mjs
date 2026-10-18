@@ -174,7 +174,7 @@ await check("单张输出一行图片引用", () => {
   assert.match(text, /!\[三视图\.png\]\(<D:\/out\/三视图\.png>\)/);
 });
 
-await check("多张排成每行两张的表格", () => {
+await check("多张逐行给引用，并排只作为可选示例", () => {
   const batch = sampleBatch();
   batch.results = [
     { ...batch.results[0], index: 0 },
@@ -186,8 +186,12 @@ await check("多张排成每行两张的表格", () => {
   ];
   batch.jobs = [{ model: "gpt-image-2.5" }, { model: "gpt-image-2.5" }];
   const text = formatReport(batch, { root: "D:/out" });
-  assert.match(text, /markdown \(2 per row\):/);
-  assert.match(text, /\| \| \|/);
+
+  // 每张各自独立成行，不强推表格。
+  assert.match(text, /!\[三视图\.png\]\(<D:\/out\/三视图\.png>\)\n!\[四视图\.png\]/);
+  // 并排只是提示，不是主格式。
+  assert.match(text, /并排示例：\| /);
+  assert.ok(!text.includes("markdown (2 per row)"));
 });
 
 await check("相对路径按边界裁剪，不吃掉相邻目录", () => {

@@ -1,6 +1,9 @@
-// 工具面：两个工具。
-//   create_images  批量生图 / 改图（自动路由 + 自动并发）
-//   list_models    模型档位、连通性、默认输出目录
+// 工具面：两个工具，分工单一。
+//   create_images   执行：批量生图 / 改图
+//   imagegen_info   查询：用法速查 + 当前配置
+//
+// 描述只写「什么时候用、最容易踩的一条」，具体技巧放 imagegen_info 的输出。
+// 描述写太长会被略读，技巧塞在这里等于没写。
 
 import { z } from "zod";
 
@@ -12,10 +15,10 @@ import {
   IMAGE_SIZES,
   MAX_CONCURRENCY,
   MAX_JOBS,
+  MAX_REFERENCE_BYTES,
   OUTPUT_ROOT,
   PKG_VERSION,
   RATIOS,
-  RATIO_HINTS,
   RESOLUTIONS,
   TIMEOUT_MS,
 } from "./config.mjs";
@@ -27,27 +30,39 @@ const text = (value) => [{ type: "text", text: value }];
 
 const qualityEnum = z.enum(["auto", "low", "medium", "high"]);
 
-/** 单个生图组。job 级参数覆盖顶层默认值。 */
+/** 单个生图组。任务级字段覆盖顶层默认值。 */
 const jobSchema = z.object({
-  prompt: z.string().min(1).describe("这一组要画什么，或要改成什么样。写清主体、风格、构图、光线。"),
+  prompt: z.string().min(1).describe("这一组画什么，或改成什么样。写主体、风格、构图、光线。"),
   images: z
     .array(z.string())
     .max(16)
     .optional()
-    .describe("参考图绝对路径，最多 16 张。给了就是图生图，不给就是文生图。多图时第一张通常是被改的主体。"),
-  name: z
-    .string()
-    .optional()
-    .describe("产物文件名，不含扩展名，例如 三视图。留空自动命名。重名自动加 -2/-3，不会覆盖已有文件。"),
-  n: z.number().int().min(1).max(4).optional().describe("这一组出几张，默认 1，最多 4。"),
-  ratio: z.enum(RATIOS).optional().describe("画面比例，默认 1:1。横竖版一律用它，不要用 size。"),
-  resolution: z.enum(RESOLUTIONS).optional().describe("清晰度档位，只对方形真正生效。"),
-  size: z.enum(IMAGE_SIZES).optional().describe("精确像素。只有用户点名像素时才用，非方形会被拉变形。"),
-  quality: qualityEnum.optional().describe("质量档。上游实测无差异，一般不用传。"),
-  model: z.enum(IMAGE_MODELS).optional().describe("图片模型。四个名字在上游是同一个 auto 路由。"),
-  folder: z.string().optional().describe("在输出根目录下再开子目录，支持 a/b 多级，用于分类归档。"),
-  output_dir: z.string().optional().describe("覆盖输出根目录的绝对路径。一般不传。"),
+    .describe("参考图路径，最多 16 张。给了走图生图，不给走文生图。多图时第一张是被改的主体。"),
+  name: z.string().optional().describe("产物文件名，不含扩展名。重名自动加 -2，不会覆盖。"),
+  n: z.number().int().min(1).max(4).optional().describe("这一组出几张，默认 1。"),
+  ratio: z.enum(RATIOS).optional().describe("画面比例，默认 1:1。横竖版用它，不要用 size。"),
+  resolution: z.enum(RESOLUTIONS).optional().describe("清晰度档，只对方形生效。"),
+  size: z.enum(IMAGE_SIZES).optional().describe("精确像素。只有用户点名像素时用，非方形会变形。"),
+  quality: qualityEnum.optional().describe("质量档。上游无差异，一般不用传。"),
+  model: z.enum(IMAGE_MODELS).optional().describe("图片模型。四个名字在上游同一个 auto 路由。"),
+  folder: z.string().optional().describe("输出根目录下的子目录，支持 a/b 多级。"),
+  output_dir: z.string().optional().describe("覆盖输出根目录。一般不传。"),
 });
+
+/** 用法速查。放在查询工具的输出里，而不是塞进工具描述。 */
+const USAGE = [
+  "批量        jobs: [{prompt}, {prompt}]  一次调用跑多组，自动并发",
+  "文生图      job 不带 images",
+  "图生图      job 带 images，最多 16 张，第一张是被改的主体",
+  "换位置      output_dir: 任意绝对路径，直接落在那儿，不会再套子目录",
+  '分类归档    folder: "rabbit/refs"       相对输出根，不要写绝对路径',
+  '固定文件名  name: "三视图"              重名自动加 -2，不会覆盖',
+  '横竖版      ratio: "16:9" 或 "9:16"     不要用 size，会变形',
+  "同题多张    n: 2 到 4",
+  '清晰度      resolution: "2k"            只对方形生效',
+  "只要一张    单任务可用顶层 prompt 简写，不必写 jobs",
+  "展示        返回里的 markdown 块可直接粘贴；单张一行，并排与否自定",
+];
 
 export function registerTools(server) {
   server.registerTool(
@@ -55,47 +70,33 @@ export function registerTools(server) {
     {
       title: "批量生图 / 改图",
       description:
-        "一次调用跑多个生图任务，自动判断文生图还是图生图，并自动并发执行。\n" +
-        "- 任务给 images 就是图生图（改图、换背景、换风格、风格迁移），不给就是文生图。\n" +
-        "- 多个任务自动并发（默认 3 路），不需要派多个子 agent 分别调用。\n" +
-        "- 图片默认落在项目 output/ 目录，用 folder 分类，用 name 直接指定文件名。\n" +
-        "- 返回里已经带好可直接使用的 Markdown 图片引用：单张是一行，多张是每行两张的表格，复制进回复即可展示，不要再自己拼路径。\n" +
-        "提示词写「要变成什么样」，需要保留的部分也一并说明。图生图单张 2 到 6 分钟属正常，慢不等于卡死。",
+        "生成或修改图片。任务带 images 走图生图，不带走文生图，多任务自动并发。\n" +
+        "返回可直接粘贴的 Markdown 图片引用。参数不确定先调 imagegen_info。",
       inputSchema: {
         jobs: z
           .array(jobSchema)
           .min(1)
           .max(MAX_JOBS)
           .optional()
-          .describe("任务数组，最多 " + MAX_JOBS + " 个，并发执行。只有一个任务时可用顶层 prompt 简写。"),
-        prompt: z.string().optional().describe("单任务简写：要画什么。仅在 jobs 为空时生效。"),
-        images: z
-          .array(z.string())
-          .max(16)
-          .optional()
-          .describe("单任务简写：参考图路径。仅在 jobs 为空时生效。"),
+          .describe("任务数组，最多 " + MAX_JOBS + " 个。只有一个任务时改用顶层 prompt 简写。"),
+        prompt: z.string().optional().describe("单任务简写：画什么。仅在 jobs 为空时生效。"),
+        images: z.array(z.string()).max(16).optional().describe("单任务简写：参考图路径。"),
         name: z.string().optional().describe("单任务简写：产物文件名。"),
-        n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数，默认 1，最多 4。"),
-        folder: z.string().optional().describe("所有任务的默认子目录，任务级 folder 可覆盖。"),
-        output_dir: z.string().optional().describe("所有任务的默认输出根目录，任务级 output_dir 可覆盖。"),
+        n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数。"),
+        folder: z.string().optional().describe("所有任务的默认子目录。"),
+        output_dir: z.string().optional().describe("所有任务的默认输出根目录。"),
         ratio: z.enum(RATIOS).optional().describe("所有任务的默认比例。"),
-        resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档位。"),
-        size: z
-          .enum(IMAGE_SIZES)
-          .optional()
-          .describe("所有任务的默认精确像素。非方形会被拉变形，优先用 ratio。"),
-        quality: qualityEnum.optional().describe("所有任务的默认质量档。上游实测无差异，一般不用传。"),
-        model: z
-          .enum(IMAGE_MODELS)
-          .optional()
-          .describe("所有任务的默认模型，缺省 " + DEFAULT_MODEL + "。"),
+        resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档。"),
+        size: z.enum(IMAGE_SIZES).optional().describe("所有任务的默认精确像素。"),
+        quality: qualityEnum.optional().describe("所有任务的默认质量档。"),
+        model: z.enum(IMAGE_MODELS).optional().describe("所有任务的默认模型。"),
         concurrency: z
           .number()
           .int()
           .min(1)
           .max(MAX_CONCURRENCY)
           .optional()
-          .describe("并发路数，默认 " + DEFAULT_CONCURRENCY + "。上游对并发敏感，不建议超过 4。"),
+          .describe("并发路数，默认 " + DEFAULT_CONCURRENCY + "。"),
       },
     },
     async (args) => {
@@ -123,39 +124,48 @@ export function registerTools(server) {
   );
 
   server.registerTool(
-    "list_models",
+    "imagegen_info",
     {
-      title: "查看可用模型与默认输出目录",
+      title: "查用法与当前配置",
       description:
-        "返回上游可用的图片模型、档位、比例选项、默认输出目录和连通性。\n" +
-        "参数不确定、或者想确认上游是否在线时先看这个。",
+        "返回用法速查、上游连通性、可用模型与默认输出目录。\n" +
+        "不确定参数怎么传、想确认上游是否在线、想知道图片落在哪，先调这个。",
       inputSchema: {},
     },
     async () => {
       const live = await probeModels();
-      const payload = {
-        version: PKG_VERSION,
-        upstream: {
-          baseUrl: BASE_URL,
-          reachable: live !== null,
-          models: live,
-        },
-        defaultModel: DEFAULT_MODEL,
-        outputDir: OUTPUT_ROOT,
-        models: IMAGE_MODELS,
-        resolutions: RESOLUTIONS,
-        ratios: RATIOS,
-        ratioHints: RATIO_HINTS,
-        exactSizes: IMAGE_SIZES,
-        timeoutMs: TIMEOUT_MS,
-        limits: {
-          maxJobs: MAX_JOBS,
-          defaultConcurrency: DEFAULT_CONCURRENCY,
-          maxConcurrency: MAX_CONCURRENCY,
-          maxReferenceImages: 16,
-        },
-      };
-      return { content: text(JSON.stringify(payload, null, 2)) };
+      const reachable = live !== null;
+
+      const lines = [
+        "imagegen-mcp " + PKG_VERSION,
+        "upstream  " + (reachable ? "ok" : "不可达") + "  " + BASE_URL,
+      ];
+
+      if (reachable && Array.isArray(live) && live.length > 0) {
+        lines.push("models    " + live.join("  "));
+      }
+
+      lines.push(
+        "default   model=" + DEFAULT_MODEL + "  output=" + OUTPUT_ROOT,
+        "limits    jobs<=" +
+          MAX_JOBS +
+          "  concurrency<=" +
+          MAX_CONCURRENCY +
+          "  images<=16  n<=4  timeout=" +
+          Math.round(TIMEOUT_MS / 1000) +
+          "s  ref<=" +
+          Math.round(MAX_REFERENCE_BYTES / 1024 / 1024) +
+          "MB",
+        "",
+        "usage",
+        ...USAGE,
+        "",
+        "ratio       " + RATIOS.join("  "),
+        "resolution  " + RESOLUTIONS.join("  ") + "  只对方形生效",
+        "size        " + IMAGE_SIZES.slice(1).join("  ") + "  非方形会变形",
+      );
+
+      return { content: text(lines.join("\n")) };
     },
   );
 }
