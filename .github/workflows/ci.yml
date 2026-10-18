@@ -49,6 +49,19 @@ jobs:
       - name: Integration tests
         run: npm run test:integration
 
+  checks:
+    name: text and docs checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reject emoji
+        run: node .github/scripts/check-emoji.mjs
+
   package:
     name: package smoke test
     runs-on: ubuntu-latest
