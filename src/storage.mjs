@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { IMAGE_MIME_BY_EXT, MAX_REFERENCE_BYTES, OUTPUT_ROOT } from "./config.mjs";
 
@@ -124,8 +124,9 @@ function timestamp() {
 /**
  * 解析任务的目标文件。
  *
- * - 给了 output：按绝对文件路径走，父目录自动创建。相对路径按默认根解析。
- *   这就是「任务自带文件名」，落盘后不需要再重命名。
+ * - 给了 output：绝对路径照用，父目录自动创建。
+ *   相对路径按**输出根**（output_dir 加 folder）解析，且不许爬出该根，
+ *   否则「相对路径」会绕过 output_dir 约束写到任意位置。
  * - 没给 output：落到默认目录，自动命名。
  *
  * 返回 { file, dir }：file 为空表示用自动命名。
@@ -135,7 +136,17 @@ export function resolveTargetFile({ output, output_dir, folder } = {}) {
   const wanted = String(output ?? "").trim();
   if (!wanted) return { file: "", dir };
 
-  const file = resolve(wanted);
+  if (isAbsolute(wanted)) {
+    const file = resolve(wanted);
+    return { file, dir: dirname(file) };
+  }
+
+  const file = resolve(dir, wanted);
+  const rel = relative(dir, file);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`output 的相对路径不能爬出输出目录：${wanted}`);
+  }
+
   return { file, dir: dirname(file) };
 }
 

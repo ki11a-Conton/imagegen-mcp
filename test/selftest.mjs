@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { resolveSize, withComposition } from "../src/size.mjs";
+import { IMAGE_SIZES, SQUARE_SIZES } from "../src/config.mjs";
 import {
   extFromBuffer,
   imageSize,
@@ -58,6 +59,19 @@ await check("显式 size 优先级最高并警告变形", () => {
 await check("size 为 AUTO 时按未指定处理", () => {
   const result = resolveSize({ size: "AUTO", ratio: "1:1", resolution: "1k" });
   assert.equal(result.size, "1024x1024");
+});
+
+await check("大小写 X 的方形尺寸不被误判为变形", () => {
+  const result = resolveSize({ size: "2048X2048" });
+  assert.equal(result.size, "2048X2048");
+  assert.equal(result.note, "", "方形不该给变形警告，实际: " + result.note);
+});
+
+await check("resolution=4k 下发的像素必须在 size 白名单里", () => {
+  assert.ok(
+    IMAGE_SIZES.includes(SQUARE_SIZES["4k"]),
+    "4k 会下发 " + SQUARE_SIZES["4k"] + "，但它不在 IMAGE_SIZES 里",
+  );
 });
 
 await check("构图拼进提示词", () => {
@@ -139,6 +153,15 @@ await check("output_dir 与 folder 组合仍可用", () => {
   const target = resolveTargetFile({ output_dir: "C:/tmp/out", folder: "a/b" });
   assert.equal(target.file, "");
   assert.match(target.dir.replaceAll("\\", "/"), /C:\/tmp\/out\/a\/b$/);
+});
+
+await check("相对 output 按输出根解析，不按进程 cwd", () => {
+  const target = resolveTargetFile({ output_dir: "C:/tmp/out", folder: "rabbit", output: "三视图.png" });
+  assert.match(target.file.replaceAll("\\", "/"), /C:\/tmp\/out\/rabbit\/三视图\.png$/);
+});
+
+await check("相对 output 不许爬出输出目录", () => {
+  assert.throws(() => resolveTargetFile({ output_dir: "C:/tmp/out", output: "../../escape.png" }));
 });
 
 // --- 落盘去重 ---
@@ -234,6 +257,21 @@ await check("混合模型标注为 mixed", () => {
   batch.jobs = [{ model: "gpt-image-2" }, { model: "gpt-image-2.5" }];
   batch.results = [batch.results[0], { ...batch.results[0], index: 1 }];
   assert.match(formatReport(batch, { root: "D:/out" }), /model=mixed/);
+});
+
+await check("多组落在不同目录时给出提醒", () => {
+  const batch = sampleBatch();
+  batch.results = [
+    { ...batch.results[0], index: 0, dir: "D:/out" },
+    {
+      ...batch.results[0],
+      index: 1,
+      dir: "E:/其它",
+      files: [{ path: "E:/其它/四视图.png", width: 800, height: 800, bytes: 200 }],
+    },
+  ];
+  batch.jobs = [{ model: "gpt-image-2.5" }, { model: "gpt-image-2.5" }];
+  assert.match(formatReport(batch, { root: "D:/out" }), /多组落在不同目录/);
 });
 
 await check("闸门比 worker 池窄时如实标注生效并发", () => {

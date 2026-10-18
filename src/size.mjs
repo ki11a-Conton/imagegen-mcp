@@ -3,7 +3,8 @@
 
 import { SQUARE_SIZES, RATIO_HINTS } from "./config.mjs";
 
-const isSquare = (value) => /^(\d+)x\1$/.test(String(value ?? ""));
+// 大小写不敏感：调用方不保证写小写 x，"2048X2048" 也是方形。
+const isSquare = (value) => /^(\d+)x\1$/i.test(String(value ?? ""));
 
 export function resolveSize({ size, resolution, ratio } = {}) {
   // 显式像素优先。大小写归一，避免 "AUTO" 被当成真实尺寸下发。

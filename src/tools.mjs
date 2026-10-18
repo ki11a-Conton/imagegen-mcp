@@ -14,8 +14,10 @@ import {
   IMAGE_MODELS,
   IMAGE_SIZES,
   MAX_CONCURRENCY,
+  MAX_GLOBAL_CONCURRENCY,
   MAX_JOBS,
   MAX_REFERENCE_BYTES,
+  MAX_RETRIES,
   OUTPUT_ROOT,
   PKG_VERSION,
   RATIOS,
@@ -72,7 +74,7 @@ const PARAMS = [
   '清晰度      resolution: "2k"            只对方形生效',
   "同题多张    n: 2 到 4",
   "重活降并发  多张大参考图的图生图很重，并发降到 1 到 2 更稳",
-  "自动重试    502 / 503 / 504 / 524 会退避重试，仍失败就是上游过载",
+  "自动重试    502 / 504 / 524 会退避重试；503 带 task_interrupted 是服务端超时判定，不重试",
 ];
 
 /** 输出位置。每个任务独立，默认只是缺省值，不是限制。 */
@@ -206,6 +208,10 @@ export function registerTools(server) {
           MAX_JOBS +
           "  concurrency<=" +
           MAX_CONCURRENCY +
+          "  gate=" +
+          MAX_GLOBAL_CONCURRENCY +
+          "  retries=" +
+          MAX_RETRIES +
           "  images<=16  n<=4  timeout=" +
           Math.round(TIMEOUT_MS / 1000) +
           "s  ref<=" +
@@ -214,7 +220,7 @@ export function registerTools(server) {
         "",
         "ratio       " + RATIOS.join("  "),
         "resolution  " + RESOLUTIONS.join("  ") + "  只对方形生效",
-        "size        常用 1024x1024 2048x2048 2560x1440 3840x2160；非方形会变形",
+        "size        只推荐方形 1024x1024 2048x2048 3840x3840；非方形请改用 ratio，硬传会变形",
         "",
         "params",
         ...PARAMS,
