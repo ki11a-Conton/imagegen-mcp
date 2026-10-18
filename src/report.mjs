@@ -109,7 +109,9 @@ export function formatReport(batch, { root } = {}) {
     if (note) hints.push(`  #${index + 1}  ${oneLine(note)}`);
   }
 
-  if (files.length > 1 && dirs.length === 0) {
+  // dirs 是从成功的任务派生的，files 多于 1 时 dirs 必不为空，
+  // 所以原来写 dirs.length === 0 是一段永远进不去的死代码。
+  if (dirs.length > 1) {
     hints.push("  多组落在不同目录，引用时注意路径");
   }
 

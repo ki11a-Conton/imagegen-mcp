@@ -125,6 +125,8 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 
 1. `output`：完整文件路径，含文件名与扩展名，例如 `E:/图/兔子/三视图.png`。
    父目录自动创建，落盘后不需要再重命名。`n` 大于 1 时派生 `三视图-2.png`、`三视图-3.png`。
+   写相对路径时按**输出根**（`output_dir` 加 `folder`）解析，且不许爬出该根；
+   爬出会直接报错，不会静默写到别处。
 2. `output_dir` 加 `folder`：只定目录，文件名自动生成。
 
 `output` 逐任务生效，同一批里每个任务各写各的目录与文件名。
