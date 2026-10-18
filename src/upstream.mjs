@@ -96,6 +96,16 @@ async function readImageSse(response) {
 const RETRYABLE = new Set([502, 503, 504, 524]);
 
 /**
+ * 服务端 deadline 判定。
+ *
+ * 503 有两种来源：网关瞬时过载，和服务端判定「这次生成超过截止线」。
+ * 后者带 task_interrupted，同一份请求再发一次只会再撞同一条线：
+ * 图生图单张 2 到 6 分钟，重试两次能把一次调用拖到 30 分钟以上，
+ * 而 MCP 客户端通常 10 分钟就先超时了。这种 503 必须直接失败。
+ */
+const DEADLINE_MARK = /task_interrupted/i;
+
+/**
  * 把上游错误响应压成一行可读原因。
  * 网关会返回整页 HTML，直接塞进返回会把表格撑爆，也没人看得懂。
  */
@@ -176,7 +186,7 @@ async function callOnce(payload, path) {
       const body = await response.text().catch(() => "");
       const error = new Error(describeHttpError(response.status, body));
       error.status = response.status;
-      error.retryable = RETRYABLE.has(response.status);
+      error.retryable = RETRYABLE.has(response.status) && !DEADLINE_MARK.test(body);
       throw error;
     }
 
