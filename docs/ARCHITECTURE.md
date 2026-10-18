@@ -69,7 +69,8 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 图片引用每张一行，路径转正斜杠（反斜杠是 Markdown 转义符），排版不强制。
 - 任务之间完全独立：参考图、模型、比例、张数、输出目录、文件名逐任务生效。
 - 工具描述只写「何时用」与最容易踩的一条，具体技巧放 `info` 的输出里。
-- 展示规范以 `info` 的 `display` 段为准：图片独立成段、一格只放一个元素、图文相邻不用表格、说明写表头、只用纯 Markdown。
+- 展示规范以 `info` 的 `display` 段为准：图片独立成段、一格只放一个元素、图文相邻不用表格、说明写表头、只用纯 Markdown、路径用正斜杠。
+- 方括号是 alt 不是图注：要配文另起一段，要可点链接去掉感叹号。
 - `env` 只认七个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`、`IMAGEGEN_MAX_RETRIES`。
 - 网关类错误（502 503 504 524）必须走重试，且错误文本要压成一行：网关返回整页 HTML，原样塞进返回会撑爆表格。
 - 单张参考图上限 30MB（服务端硬上限 50MB，base64 还有约 1/3 膨胀）。
