@@ -91,32 +91,37 @@ await check("带图片扩展名的相对路径 → 当文件", () => {
   assert.equal(target.dir, resolve(OUTPUT_ROOT, "兔子"));
 });
 
-await check("绝对目录指哪落哪", () => {
-  const target = resolveOutput({ output: "C:/tmp/out/sub" });
+// 绝对路径的写法跨平台不同：Windows 认盘符，POSIX 认根斜杠。
+const ABS_DIR = process.platform === "win32" ? "C:/tmp/out/sub" : "/tmp/out/sub";
+const ABS_FILE = process.platform === "win32" ? "E:/图/兔子/三视图.png" : "/图/兔子/三视图.png";
+
+await check("绝对目录指哪落哪，不嵌套到默认根下", () => {
+  const target = resolveOutput({ output: ABS_DIR });
   assert.equal(target.file, "");
-  assert.equal(target.dir, resolve("C:/tmp/out/sub"));
+  assert.equal(target.dir, resolve(ABS_DIR));
+  assert.ok(!target.dir.startsWith(OUTPUT_ROOT), "绝对目录不应再挂到默认根下：" + target.dir);
 });
 
 await check("绝对文件路径照用，父目录取父级", () => {
-  const target = resolveOutput({ output: "E:/图/兔子/三视图.png" });
-  assert.match(target.file.replaceAll("\\", "/"), /E:\/图\/兔子\/三视图\.png$/);
-  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子$/);
+  const target = resolveOutput({ output: ABS_FILE });
+  assert.match(target.file.replaceAll("\\", "/"), /图\/兔子\/三视图\.png$/);
+  assert.match(target.dir.replaceAll("\\", "/"), /图\/兔子$/);
 });
 
 await check("末尾斜杠一定是文件夹，哪怕写成 .png", () => {
-  const target = resolveOutput({ output: "E:/图/兔子.png/" });
+  const target = resolveOutput({ output: "图/兔子.png/" });
   assert.equal(target.file, "");
-  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子\.png$/);
+  assert.match(target.dir.replaceAll("\\", "/"), /图\/兔子\.png$/);
 });
 
 await check("带点但不是图片扩展名 → 仍是文件夹", () => {
-  const target = resolveOutput({ output: "E:/图/v1.2" });
+  const target = resolveOutput({ output: "图/v1.2" });
   assert.equal(target.file, "");
-  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/v1\.2$/);
+  assert.match(target.dir.replaceAll("\\", "/"), /图\/v1\.2$/);
 });
 
 await check("大写扩展名同样识别为文件", () => {
-  const target = resolveOutput({ output: "E:/图/兔子/三视图.PNG" });
+  const target = resolveOutput({ output: "图/兔子/三视图.PNG" });
   assert.match(target.file.replaceAll("\\", "/"), /三视图\.PNG$/);
 });
 
