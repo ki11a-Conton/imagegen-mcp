@@ -37,6 +37,7 @@
 - `install.ps1` 里不能写未加括号的 `'key: ' + $value`。PowerShell 逗号比加号绑得紧，会拆成两个数组元素，YAML 直接解析失败。
 - PowerShell 的 `$Home` 是只读自动变量，函数参数不能叫这个名字。
 - `report.mjs` 里中文文件名必须留在最后一列，放中间会把 ASCII 列对齐撑歪。
+- `info` 的列表必须走 `columns()`：中文双宽，手敲空格补出来的对齐只在等宽字体下凑巧成立。
 - 改完 `install.ps1` 要用 PowerShell 5.1 与 7 各跑一次。
 - 上游调用必须走 `callUpstreamLimited`。直接调 `callUpstream` 会绕过进程级闸门，多次调用的总量失控。
 - 删参数时 `inputSchema` 与 `defaults` 要一起删。zod 剥掉未知字段，调用方传旧参数**不报错**，只会静默失效。
