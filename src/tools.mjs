@@ -44,9 +44,7 @@ const jobSchema = z.object({
     .string()
     .optional()
     .describe(
-      "输出文件的完整绝对路径，含文件名与扩展名，例如 E:/图/兔子/三视图.png。" +
-        "父目录自动创建，落盘后不需要再重命名。n 大于 1 时派生 三视图-2.png、三视图-3.png。" +
-        "同名已存在时自动加 -2，不覆盖。省略则落到默认目录并自动命名。",
+      '写到哪：带图片扩展名当文件，不带当文件夹，省略则落默认目录自动命名。例 "兔子" / "E:/图/兔子/三视图.png"。',
     ),
   n: z.number().int().min(1).max(4).optional().describe("这一组出几张，默认 1。"),
   ratio: z.enum(RATIOS).optional().describe("画面比例，默认 1:1。横竖版用它，不要用 size。"),
@@ -54,11 +52,6 @@ const jobSchema = z.object({
   size: z.enum(IMAGE_SIZES).optional().describe("精确像素。只有用户点名像素时用，非方形会变形。"),
   quality: qualityEnum.optional().describe("质量档。上游无差异，一般不用传。"),
   model: z.enum(IMAGE_MODELS).optional().describe("图片模型。四个名字在上游同一个 auto 路由。"),
-  folder: z.string().optional().describe("未给 output 时的分类子目录，相对默认输出根，支持 a/b 多级。"),
-  output_dir: z
-    .string()
-    .optional()
-    .describe("未给 output 时的输出根目录，绝对路径。默认 <项目根>/output，只是缺省值。"),
 });
 
 // 用法与排版规范。放在查询工具的输出里，而不是塞进工具描述：
@@ -77,14 +70,27 @@ const PARAMS = [
   "自动重试    502 / 504 / 524 会退避重试；503 带 task_interrupted 是服务端超时判定，不重试",
 ];
 
-/** 输出位置。每个任务独立，默认只是缺省值，不是限制。 */
+/** 输出位置。只有一个参数 output，靠路径形态区分文件与文件夹。 */
 const OUTPUT = [
-  '指定文件    output: "E:/图/兔子/三视图.png"  完整绝对路径，父目录自动建',
+  "一条规则    带图片扩展名就是文件，不带就是文件夹，不写就自动命名",
+  '不写        "prompt": "一只兔子"                  落默认目录，文件名自动',
+  '给文件夹    "output": "兔子"                      默认目录下的 兔子/',
+  '给全局目录  "output": "E:/图/兔子"                绝对路径，指哪落哪',
+  '给文件      "output": "E:/图/兔子/三视图.png"      就叫这个名字，父目录自动建',
   "多张        n 大于 1 时派生 三视图-2.png、三视图-3.png",
-  '只定目录    output_dir: "E:/图" 加 folder: "兔子"  仍自动命名',
-  "默认        <项目根>/output 自动命名，仅作缺省值",
-  "不覆盖      同名已存在时自动加 -2",
-  "独立性      output 逐任务生效，同一批里各写各的",
+  "不覆盖      同名已存在时自动加 -2，绝不覆盖",
+  "逐任务      output 每个任务各写各的，同一批可以分开落盘",
+  "相对路径    按输出根解析，爬出输出根会直接报错",
+];
+
+/** 直接可抄的调用。agent 最容易卡在「参数长什么样」，给例子比给规则有效。 */
+const EXAMPLES = [
+  '一张图    {"prompt": "白底三视图，橘黄色兔子"}',
+  '多组      {"jobs": [{"prompt": "正面"}, {"prompt": "侧面", "ratio": "16:9"}]}',
+  '改图      {"prompt": "背景换成雪山日落，主体不变", "images": ["D:/refs/a.jpg"]}',
+  '指定文件  {"prompt": "...", "output": "E:/图/兔子/三视图.png"}',
+  '分类目录  {"prompt": "...", "output": "兔子"}',
+  '同题多张  {"prompt": "...", "n": 4}',
 ];
 
 /** 展示规范。图片怎么排才不会被渲染破坏。 */
@@ -138,10 +144,11 @@ export function registerTools(server) {
           .describe("任务数组，最多 " + MAX_JOBS + " 个。只有一个任务时改用顶层 prompt 简写。"),
         prompt: z.string().optional().describe("单任务简写：画什么。仅在 jobs 为空时生效。"),
         images: z.array(z.string()).max(16).optional().describe("单任务简写：参考图路径。"),
-        output: z.string().optional().describe("单任务简写：输出文件完整绝对路径，含文件名。"),
+        output: z
+          .string()
+          .optional()
+          .describe('单任务简写：写到哪，规则同任务里的 output。例 "兔子" / "E:/图/兔子/三视图.png"。'),
         n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数。"),
-        folder: z.string().optional().describe("所有任务的默认分类子目录。"),
-        output_dir: z.string().optional().describe("所有任务的默认输出根目录，任意绝对路径。"),
         ratio: z.enum(RATIOS).optional().describe("所有任务的默认比例。"),
         resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档。"),
         size: z.enum(IMAGE_SIZES).optional().describe("所有任务的默认精确像素。"),
@@ -158,8 +165,7 @@ export function registerTools(server) {
     },
     async (args) => {
       const defaults = {
-        folder: args.folder,
-        output_dir: args.output_dir,
+        output: args.output,
         ratio: args.ratio,
         resolution: args.resolution,
         size: args.size,
@@ -221,6 +227,9 @@ export function registerTools(server) {
         "ratio       " + RATIOS.join("  "),
         "resolution  " + RESOLUTIONS.join("  ") + "  只对方形生效",
         "size        只推荐方形 1024x1024 2048x2048 3840x3840；非方形请改用 ratio，硬传会变形",
+        "",
+        "examples    直接改参数就能用",
+        ...EXAMPLES,
         "",
         "params",
         ...PARAMS,

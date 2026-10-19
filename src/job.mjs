@@ -11,7 +11,7 @@
 import { DEFAULT_CONCURRENCY, DEFAULT_MODEL, MAX_CONCURRENCY, MAX_GLOBAL_CONCURRENCY } from "./config.mjs";
 import { resolveSize, withComposition } from "./size.mjs";
 import { callUpstream } from "./upstream.mjs";
-import { referenceHash, resolveTargetFile, saveResultItems, toImageReference } from "./storage.mjs";
+import { referenceHash, resolveOutput, saveResultItems, toImageReference } from "./storage.mjs";
 
 // --- 进程级并发闸门 ---
 
@@ -58,11 +58,7 @@ function normalizeJob(raw, defaults, index) {
   );
 
   const size = resolveSize({ size: job.size, resolution: job.resolution, ratio: job.ratio });
-  const target = resolveTargetFile({
-    output: job.output,
-    output_dir: job.output_dir,
-    folder: job.folder,
-  });
+  const target = resolveOutput({ output: job.output });
 
   return {
     index,
@@ -163,7 +159,7 @@ async function runWithConcurrency(tasks, limit) {
  * 单个任务归一化失败只让那一个失败，不影响其余任务。
  *
  * @param {object[]} rawJobs     原始任务数组
- * @param {object}   defaults    顶层默认值（model / ratio / folder / output_dir 等）
+ * @param {object}   defaults    顶层默认值（model / ratio / resolution / size / quality / n / output）
  * @param {number}   concurrency 并发路数
  */
 export async function runJobs(rawJobs, defaults, concurrency) {
