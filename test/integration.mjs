@@ -89,7 +89,6 @@ async function main() {
         await client.callTool({
           name: "create_images",
           arguments: {
-            folder: "batch",
             concurrency: 3,
             jobs: [
               { prompt: "白底三视图", output: join(workspace, "batch", "a.png") },
@@ -111,7 +110,22 @@ async function main() {
       }
     });
 
-    await check("folder 分类落到子目录", async () => {
+    await check("output 给目录时落进该目录并自动命名", async () => {
+      const text = textOf(
+        await client.callTool({
+          name: "create_images",
+          arguments: { prompt: "落到目录", output: join(workspace, "by-dir") },
+        }),
+      );
+      if (!text.includes("1/1 ok")) throw new Error("应成功: " + text);
+      const entries = await readdir(join(workspace, "by-dir"));
+      if (entries.length !== 1) throw new Error("by-dir 应有 1 个文件，实际 " + entries.length);
+      if (!/\.(png|jpg|webp)$/i.test(entries[0])) {
+        throw new Error("不给文件名时应自动命名，实际 " + entries[0]);
+      }
+    });
+
+    await check("批量任务各自的 output 互不干扰", async () => {
       const batchDir = join(workspace, "batch");
       const entries = await readdir(batchDir);
       if (entries.length !== 3) throw new Error("batch 目录应有 3 个文件，实际 " + entries.length);
@@ -135,7 +149,7 @@ async function main() {
     await check("n 大于 1 时生成多张", async () => {
       const result = await client.callTool({
         name: "create_images",
-        arguments: { prompt: "四张", folder: "multi", n: 4, ratio: "16:9" },
+        arguments: { prompt: "四张", output: join(workspace, "multi"), n: 4, ratio: "16:9" },
       });
       const text = textOf(result);
       if (!text.includes("1/1 ok")) throw new Error("应成功: " + text);
@@ -147,7 +161,9 @@ async function main() {
       const text = textOf(
         await client.callTool({
           name: "create_images",
-          arguments: { jobs: [{ prompt: "echo 这组", images: [reference], folder: "echo" }] },
+          arguments: {
+            jobs: [{ prompt: "echo 这组", images: [reference], output: join(workspace, "echo") }],
+          },
         }),
       );
       if (!/与参考图字节相同/.test(text)) throw new Error("应提示回传原图: " + text);
@@ -158,8 +174,12 @@ async function main() {
         name: "create_images",
         arguments: {
           jobs: [
-            { prompt: "正常任务", folder: "mixed" },
-            { prompt: "坏参考图", images: [join(workspace, "missing.png")], folder: "mixed" },
+            { prompt: "正常任务", output: join(workspace, "mixed") },
+            {
+              prompt: "坏参考图",
+              images: [join(workspace, "missing.png")],
+              output: join(workspace, "mixed"),
+            },
           ],
           concurrency: 2,
         },
@@ -197,7 +217,6 @@ async function main() {
         arguments: {
           // 顶层默认值，应被任务级逐项覆盖。
           ratio: "1:1",
-          folder: "shared",
           n: 1,
           jobs: [
             {
@@ -274,8 +293,8 @@ async function main() {
         arguments: {
           concurrency: 3,
           jobs: [
-            { prompt: "并发丙一", folder: "par-b" },
-            { prompt: "并发丙二", folder: "par-b" },
+            { prompt: "并发丙一", output: join(workspace, "par-b") },
+            { prompt: "并发丙二", output: join(workspace, "par-b") },
           ],
         },
       });
@@ -287,11 +306,11 @@ async function main() {
       const [first, second] = await Promise.all([
         client.callTool({
           name: "create_images",
-          arguments: { jobs: [{ prompt: "并发甲", folder: "par-a" }] },
+          arguments: { jobs: [{ prompt: "并发甲", output: join(workspace, "par-a") }] },
         }),
         client.callTool({
           name: "create_images",
-          arguments: { jobs: [{ prompt: "并发乙", folder: "par-a" }] },
+          arguments: { jobs: [{ prompt: "并发乙", output: join(workspace, "par-a") }] },
         }),
       ]);
       const peakSplit = mock.stats.peakConcurrent;
@@ -320,14 +339,14 @@ async function main() {
             name: "create_images",
             arguments: {
               concurrency: 3,
-              jobs: [1, 2, 3].map((i) => ({ prompt: "压一" + i, folder: "cap" })),
+              jobs: [1, 2, 3].map((i) => ({ prompt: "压一" + i, output: "cap" })),
             },
           }),
           capped.callTool({
             name: "create_images",
             arguments: {
               concurrency: 3,
-              jobs: [1, 2, 3].map((i) => ({ prompt: "压二" + i, folder: "cap" })),
+              jobs: [1, 2, 3].map((i) => ({ prompt: "压二" + i, output: "cap" })),
             },
           }),
         ]);
@@ -346,7 +365,7 @@ async function main() {
       const text = textOf(
         await client.callTool({
           name: "create_images",
-          arguments: { prompt: "deadline-503 触发超时", folder: "deadline" },
+          arguments: { prompt: "deadline-503 触发超时", output: join(workspace, "deadline") },
         }),
       );
       if (!text.includes("0/1 ok")) throw new Error("应判失败: " + text);

@@ -4,18 +4,11 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { resolveSize, withComposition } from "../src/size.mjs";
-import { IMAGE_SIZES, SQUARE_SIZES } from "../src/config.mjs";
-import {
-  extFromBuffer,
-  imageSize,
-  resolveOutputDir,
-  resolveTargetFile,
-  sanitizeName,
-  writeUnique,
-} from "../src/storage.mjs";
+import { IMAGE_SIZES, OUTPUT_ROOT, SQUARE_SIZES } from "../src/config.mjs";
+import { extFromBuffer, imageSize, resolveOutput, sanitizeName, writeUnique } from "../src/storage.mjs";
 import { formatReport } from "../src/report.mjs";
 
 let passed = 0;
@@ -79,22 +72,57 @@ await check("构图拼进提示词", () => {
   assert.match(withComposition("画猫", "横向构图"), /画猫[\s\S]*横向构图/);
 });
 
-// --- 目录解析 ---
-await check("不给参数落到默认 output 根", () => {
-  const dir = resolveOutputDir({});
-  assert.ok(dir.length > 0);
-  assert.ok(!dir.endsWith("generated-images"));
+// --- 输出路径解析（一个参数，靠形态区分文件与文件夹）---
+await check("不给 output 落到默认根并自动命名", () => {
+  const target = resolveOutput({});
+  assert.equal(target.file, "");
+  assert.equal(target.dir, OUTPUT_ROOT);
 });
 
-await check("folder 追加子目录，支持多级", () => {
-  const root = resolveOutputDir({ output_dir: "C:/tmp/out" });
-  const sub = resolveOutputDir({ output_dir: "C:/tmp/out", folder: "rabbit/refs" });
-  assert.ok(sub.startsWith(root));
-  assert.match(sub, /rabbit[\\/]refs$/);
+await check("不带图片扩展名 → 当文件夹", () => {
+  const target = resolveOutput({ output: "兔子" });
+  assert.equal(target.file, "");
+  assert.equal(target.dir, resolve(OUTPUT_ROOT, "兔子"));
 });
 
-await check("folder 拒绝路径穿越", () => {
-  assert.throws(() => resolveOutputDir({ folder: "../etc" }));
+await check("带图片扩展名的相对路径 → 当文件", () => {
+  const target = resolveOutput({ output: "兔子/三视图.png" });
+  assert.match(target.file.replaceAll("\\", "/"), /兔子\/三视图\.png$/);
+  assert.equal(target.dir, resolve(OUTPUT_ROOT, "兔子"));
+});
+
+await check("绝对目录指哪落哪", () => {
+  const target = resolveOutput({ output: "C:/tmp/out/sub" });
+  assert.equal(target.file, "");
+  assert.equal(target.dir, resolve("C:/tmp/out/sub"));
+});
+
+await check("绝对文件路径照用，父目录取父级", () => {
+  const target = resolveOutput({ output: "E:/图/兔子/三视图.png" });
+  assert.match(target.file.replaceAll("\\", "/"), /E:\/图\/兔子\/三视图\.png$/);
+  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子$/);
+});
+
+await check("末尾斜杠一定是文件夹，哪怕写成 .png", () => {
+  const target = resolveOutput({ output: "E:/图/兔子.png/" });
+  assert.equal(target.file, "");
+  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子\.png$/);
+});
+
+await check("带点但不是图片扩展名 → 仍是文件夹", () => {
+  const target = resolveOutput({ output: "E:/图/v1.2" });
+  assert.equal(target.file, "");
+  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/v1\.2$/);
+});
+
+await check("大写扩展名同样识别为文件", () => {
+  const target = resolveOutput({ output: "E:/图/兔子/三视图.PNG" });
+  assert.match(target.file.replaceAll("\\", "/"), /三视图\.PNG$/);
+});
+
+await check("相对路径不许爬出输出根", () => {
+  assert.throws(() => resolveOutput({ output: "../escaped.png" }));
+  assert.throws(() => resolveOutput({ output: "../escaped" }));
 });
 
 // --- 文件名净化 ---
@@ -136,32 +164,10 @@ await check("过短或不认识的 buffer 返回 null", () => {
   assert.equal(imageSize(Buffer.from("plain text content here")), null);
 });
 
-// --- 目标文件解析 ---
-await check("output 给了绝对路径就照用，目录取父级", () => {
-  const target = resolveTargetFile({ output: "E:/图/兔子/三视图.png" });
-  assert.match(target.file.replaceAll("\\", "/"), /E:\/图\/兔子\/三视图\.png$/);
-  assert.match(target.dir.replaceAll("\\", "/"), /E:\/图\/兔子$/);
-});
-
-await check("没有 output 时落到默认目录并自动命名", () => {
-  const target = resolveTargetFile({ folder: "rabbit" });
-  assert.equal(target.file, "");
-  assert.match(target.dir.replaceAll("\\", "/"), /output\/rabbit$/);
-});
-
-await check("output_dir 与 folder 组合仍可用", () => {
-  const target = resolveTargetFile({ output_dir: "C:/tmp/out", folder: "a/b" });
-  assert.equal(target.file, "");
-  assert.match(target.dir.replaceAll("\\", "/"), /C:\/tmp\/out\/a\/b$/);
-});
-
-await check("相对 output 按输出根解析，不按进程 cwd", () => {
-  const target = resolveTargetFile({ output_dir: "C:/tmp/out", folder: "rabbit", output: "三视图.png" });
-  assert.match(target.file.replaceAll("\\", "/"), /C:\/tmp\/out\/rabbit\/三视图\.png$/);
-});
-
-await check("相对 output 不许爬出输出目录", () => {
-  assert.throws(() => resolveTargetFile({ output_dir: "C:/tmp/out", output: "../../escape.png" }));
+// 紧凑校验：默认根 + 相对文件路径落在根下。
+await check("相对文件路径落在输出根下，不按进程 cwd", () => {
+  const target = resolveOutput({ output: "rabbit/三视图.png" });
+  assert.match(target.file.replaceAll("\\", "/"), /output\/rabbit\/三视图\.png$/);
 });
 
 // --- 落盘去重 ---

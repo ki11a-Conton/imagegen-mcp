@@ -267,7 +267,7 @@ else {
 Write-Host ''
 Write-Step 'done'
 Write-Detail 'restart DSH, then tools create_images / info are available'
-Write-Detail ('default output: ' + (Join-Path $target 'output') + ' (use folder to categorize)')
+Write-Detail ('default output: ' + (Join-Path $target 'output') + ' (pass output: "sub" to categorize)')
 Write-Detail 'for 2K/4K enable image_upscale_enabled in chatgpt2api'
 
 # robocopy 成功时也会返回 1，脚本结束前显式清零，避免被当成失败。

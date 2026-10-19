@@ -91,24 +91,45 @@ export function sanitizeName(name) {
   );
 }
 
+/** 图片扩展名集合。只用来判断「这条路径是在给文件还是在给目录」，不参与决定真实格式。 */
+const IMAGE_EXTS = new Set(Object.keys(IMAGE_MIME_BY_EXT));
+
 /**
- * 解析目标目录。
- * - output_dir 省略：用 IMAGEGEN_OUTPUT_DIR，兜底 <项目根>/output
- * - folder 给出：在其下再开一层，支持 a/b 多级，拒绝绝对路径与 ..
+ * 把调用方给的**一个路径**解析成「写到哪」。
+ *
+ * 判据只有一条：这条路径是不是在指一个图片文件。
+ *
+ *   省略                          → 默认根，自动命名
+ *   末尾是 / 或 \                 → 目录（显式，优先级最高）
+ *   扩展名是图片扩展名            → 文件
+ *   其它                          → 目录
+ *
+ * 扩展名在这里只承担「文件还是目录」的职责，真实格式仍由字节魔数决定，
+ * 所以调用方写 .png 而实际收到 JPEG 也不会出错。
+ * 判错时的代价是有界的：最坏是多出一个文件夹，不会把你的文件夹变成一张图。
+ *
+ * 相对路径一律按输出根解析，且不许爬出该根。
+ * 返回 { file, dir }：file 为空表示用自动命名。
  */
-export function resolveOutputDir({ output_dir, folder } = {}) {
-  const root = output_dir ? resolve(output_dir) : OUTPUT_ROOT;
+export function resolveOutput({ output } = {}) {
+  const raw = String(output ?? "").trim();
+  if (!raw) return { file: "", dir: OUTPUT_ROOT };
 
-  const segments = String(folder ?? "")
-    .replaceAll("\\", "/")
-    .replace(/^\/+/, "")
-    .split("/")
-    .filter(Boolean);
+  const normalized = raw.replaceAll("\\", "/");
+  const wantsDir = /\/$/.test(normalized);
+  const wantsFile = !wantsDir && IMAGE_EXTS.has(extname(normalized).toLowerCase());
 
-  const invalid = segments.find((segment) => segment === "." || segment === "..");
-  if (invalid) throw new Error(`folder 不能包含 . 或 ..：${folder}`);
+  const absolute = isAbsolute(normalized);
+  const target = absolute ? resolve(normalized) : resolve(OUTPUT_ROOT, normalized);
 
-  return segments.length > 0 ? resolve(root, ...segments) : root;
+  if (!absolute) {
+    const rel = relative(OUTPUT_ROOT, target);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      throw new Error(`output 不能爬出输出目录：${raw}`);
+    }
+  }
+
+  return wantsFile ? { file: target, dir: dirname(target) } : { file: "", dir: target };
 }
 
 /** 时间戳只到秒，唯一性靠随机量。 */
@@ -119,35 +140,6 @@ function timestamp() {
     `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
     `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   );
-}
-
-/**
- * 解析任务的目标文件。
- *
- * - 给了 output：绝对路径照用，父目录自动创建。
- *   相对路径按**输出根**（output_dir 加 folder）解析，且不许爬出该根，
- *   否则「相对路径」会绕过 output_dir 约束写到任意位置。
- * - 没给 output：落到默认目录，自动命名。
- *
- * 返回 { file, dir }：file 为空表示用自动命名。
- */
-export function resolveTargetFile({ output, output_dir, folder } = {}) {
-  const dir = resolveOutputDir({ output_dir, folder });
-  const wanted = String(output ?? "").trim();
-  if (!wanted) return { file: "", dir };
-
-  if (isAbsolute(wanted)) {
-    const file = resolve(wanted);
-    return { file, dir: dirname(file) };
-  }
-
-  const file = resolve(dir, wanted);
-  const rel = relative(dir, file);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error(`output 的相对路径不能爬出输出目录：${wanted}`);
-  }
-
-  return { file, dir: dirname(file) };
 }
 
 /**

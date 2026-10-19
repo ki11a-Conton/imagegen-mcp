@@ -29,7 +29,7 @@ export const TIMEOUT_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 600_000;
 })();
 
-/** 默认落盘根目录：项目根目录下的 output/。任务可用 output 或 output_dir 覆盖。 */
+/** 默认落盘根目录：项目根目录下的 output/。任务可用 output 指到别处。 */
 export const OUTPUT_ROOT = resolve(process.env.IMAGEGEN_OUTPUT_DIR || join(PROJECT_ROOT, "output"));
 
 /**
