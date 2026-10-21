@@ -152,6 +152,15 @@ function ConvertTo-YamlValue([string]$Value) {
     return '"' + $escaped + '"'
 }
 
+# 滚动备份：改 cordis.patch.yml 前留一份，同名互相覆盖，永远只有最近 1 份。
+# 铺开时间戳备份会让 DSH 主目录越攒越多（已为此清过一轮），所以固定单一文件名。
+function Backup-PatchFile([string]$Path) {
+    if (-not (Test-Path $Path)) { return }
+    $backup = "$Path.bak"
+    Copy-Item -LiteralPath $Path -Destination $backup -Force
+    Write-Detail ('backup   ' + $backup)
+}
+
 function Update-PatchFile {
     param([string]$Path, [string[]]$Block)
 
@@ -258,6 +267,7 @@ else {
     $patchPath = Join-Path (Join-Path (Join-Path $homeDir 'profiles') $profileName) 'cordis.patch.yml'
     $entryFile = Join-Path (Join-Path $target 'src') 'index.mjs'
     $block = Build-ConfigBlock -NodeFile $nodeFile -EntryFile $entryFile -WorkDir $target -Url $url -Key $ApiKey
+    Backup-PatchFile -Path $patchPath
     $action = Update-PatchFile -Path $patchPath -Block $block
 
     Write-Ok ($action + ' ' + $patchPath)

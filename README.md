@@ -32,7 +32,8 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 脚本自动探测 Node、DSH 主目录和 profile，拷贝文件、装依赖，并把 `mcp-imagegen` 配置块写进
 `<DSH_HOME>/profiles/<profile>/cordis.patch.yml`。重启 DSH 后工具可用。
 
-重复安装原地替换同一个配置块，不会重复追加。PowerShell 5.1 与 7 都支持。
+重复安装原地替换同一个配置块，不会重复追加。改写前自动备份到 `cordis.patch.yml.bak`（固定单份，
+下次安装覆盖）。PowerShell 5.1 与 7 都支持。
 
 常用参数：
 
