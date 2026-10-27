@@ -4,6 +4,7 @@
 
 - 依赖只能自上而下：`index` → `tools` → `job` → `{size, storage, upstream}` → `config`。禁止反向 import。
 - 日志只能走 `process.stderr`。`stdout` 留给 JSON-RPC 帧。
+- stderr 行一律以 `[imagegen-mcp]` 开头（对齐 DSH 终端 `[来源]` 日志惯例），见 `index.mjs` 的 ready 与 fatal 行。
 - 落盘必须保留独占创建（`flag: "wx"`）与重名退化，不允许改成覆盖写。
 - `output` 是**一个路径**：带图片扩展名当文件，不带当文件夹。扩展名只用来判断落盘形态，真实格式仍以字节魔数为准。
 - 网关类错误（502 503 504 524）必须可重试，错误文本必须先压成一行，不能把 HTML 原样返回。
