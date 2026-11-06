@@ -17,6 +17,9 @@ const fmtSeconds = (ms) => `${(ms / 1000).toFixed(1)}s`;
 
 const fmtDims = ({ width, height }) => (width && height ? `${width}x${height}` : "-");
 
+// GIF 额外带帧数，调用方一眼能确认这是动图而不是静态图。
+const fmtDimsAny = (file) => (file.animated ? `${fmtDims(file)} ${file.frames}f` : fmtDims(file));
+
 const basename = (path) => path.split(/[\\/]/).pop() ?? "image";
 
 /** 单行化，避免上游多行报错把表格撑破。 */
@@ -92,7 +95,7 @@ export function formatReport(batch, { root } = {}) {
     result.route === "edit" ? "edit" : "gen",
     result.ok ? "ok" : "FAIL",
     fmtSeconds(result.ms),
-    result.ok ? result.files.map(fmtDims).join(" ") : "-",
+    result.ok ? result.files.map(fmtDimsAny).join(" ") : "-",
     result.ok ? relTo(result.files[0].path, root) : oneLine(result.error),
   ]);
 

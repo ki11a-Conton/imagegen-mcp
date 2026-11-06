@@ -47,6 +47,14 @@ const jobSchema = z.object({
       '写到哪：带图片扩展名才算给文件命名，不带就当文件夹，省略则自动命名。例 "兔子"（目录）/ "兔子/三视图.png"（文件）。',
     ),
   n: z.number().int().min(1).max(4).optional().describe("这一组出几张，默认 1。"),
+  animated: z
+    .boolean()
+    .optional()
+    .describe(
+      "动画 GIF。true 时提示词末尾追加多帧硬约束，且忽略 size/resolution（动图尺寸由上游决定，实测约 300~440px）。" +
+        "帧数请写进 prompt（如「10 帧，无缝循环」）。耗时 50~65 秒，比静态图慢；" +
+        "上游偶发内容防护拒绝（约 5%），原样重发即可。",
+    ),
   ratio: z.enum(RATIOS).optional().describe("画面比例，默认 1:1。横竖版用它，不要用 size。"),
   resolution: z.enum(RESOLUTIONS).optional().describe("清晰度档，只对方形生效。"),
   size: z.enum(IMAGE_SIZES).optional().describe("精确像素。只有用户点名像素时用，非方形会变形。"),
@@ -88,6 +96,7 @@ const PARAMS = columns([
   ["横竖版", 'ratio: "16:9" 或 "9:16"     不要用 size，会变形'],
   ["清晰度", 'resolution: "2k"            只对方形生效'],
   ["同题多张", "n: 2 到 4"],
+  ["动画GIF", 'animated: true     帧数写进 prompt，如 "10 帧，无缝循环"；size/resolution 会被忽略'],
   ["重活降并发", "多张大参考图的图生图很重，并发降到 1 到 2 更稳"],
   ["自动重试", "502 / 504 / 524 会退避重试；503 带 task_interrupted 是服务端超时判定，不重试"],
 ]);
@@ -116,6 +125,7 @@ const EXAMPLES = columns([
   ["分类目录", '{"prompt": "...", "output": "兔子"}'],
   ["目录加命名", '{"prompt": "...", "output": "兔子/三视图.png"}'],
   ["同题多张", '{"prompt": "...", "n": 4}'],
+  ["动画 GIF", '{"prompt": "小章鱼跳舞，10 帧，无缝循环", "animated": true}'],
 ]);
 
 /** 展示规范。图片怎么排才不会被渲染破坏。 */
@@ -176,6 +186,10 @@ export function registerTools(server) {
           .optional()
           .describe('单任务简写：写到哪，规则同任务里的 output。例 "兔子" / "E:/图/兔子/三视图.png"。'),
         n: z.number().int().min(1).max(4).optional().describe("所有任务的默认张数。"),
+        animated: z
+          .boolean()
+          .optional()
+          .describe("所有任务的默认动画开关：true 出多帧 GIF，规则见任务级同名参数。"),
         ratio: z.enum(RATIOS).optional().describe("所有任务的默认比例。"),
         resolution: z.enum(RESOLUTIONS).optional().describe("所有任务的默认清晰度档。"),
         size: z.enum(IMAGE_SIZES).optional().describe("所有任务的默认精确像素。"),
@@ -199,6 +213,7 @@ export function registerTools(server) {
         quality: args.quality,
         model: args.model,
         n: args.n,
+        animated: args.animated,
       };
 
       const rawJobs =

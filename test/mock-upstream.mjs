@@ -11,6 +11,25 @@ const PNG_1X1 = Buffer.from(
   "base64",
 );
 
+/**
+ * 构造合法的 GIF89a 字节流（N 帧，2x2 画布）。
+ * 每帧一个 Graphic Control Extension（21 F9 04）+ 图像描述符，供帧数断言。
+ */
+function gifBytes(frames) {
+  const parts = [
+    Buffer.from("GIF89a", "latin1"),
+    Buffer.from([0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00]), // LSD 2x2 无调色板
+  ];
+  for (let index = 0; index < frames; index += 1) {
+    parts.push(Buffer.from([0x21, 0xf9, 0x04, 0x00, 0x64, 0x00, 0x00])); // GCE，100ms/帧
+    parts.push(Buffer.from([0x2c, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00])); // 图像描述符
+    parts.push(Buffer.from([0x02, 0x02, 0x04, 0x03])); // 最小 LCM 数据
+    parts.push(Buffer.from([0x00]));
+  }
+  parts.push(Buffer.from([0x3b])); // trailer
+  return Buffer.concat(parts);
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function frame(payload) {
@@ -37,7 +56,7 @@ export async function startMockUpstream({ delayMs = 0 } = {}) {
 
     if (url.pathname === "/v1/models" && request.method === "GET") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ data: [{ id: "gpt-image-2.5" }] }));
+      response.end(JSON.stringify({ data: [{ id: "gpt-image-2.6" }] }));
       return;
     }
 
@@ -95,6 +114,10 @@ export async function startMockUpstream({ delayMs = 0 } = {}) {
     // 特殊约定：提示词里带 echo 时，把参考图原样回传，用于测试「上游回传原图」的告警。
     const wantsEcho = typeof body.prompt === "string" && body.prompt.includes("echo");
 
+    // 特殊约定：提示词带 animated GIF（ANIMATED_DIRECTIVE 的固定内容）时回 8 帧 GIF 字节，
+    // 模拟 Images 2.6 的动图产出，让集成测试能断言后缀、帧数与报告。
+    const wantsGif = typeof body.prompt === "string" && body.prompt.includes("animated GIF");
+
     if (wantsEcho && isEdit && Array.isArray(body.images) && body.images.length > 0) {
       const reference = String(body.images[0]);
       const at = reference.indexOf("base64,");
@@ -103,7 +126,8 @@ export async function startMockUpstream({ delayMs = 0 } = {}) {
       }
     } else {
       for (let index = 0; index < count; index += 1) {
-        response.write(frame({ created: 1, b64_json: PNG_1X1.toString("base64") }));
+        const image = wantsGif ? gifBytes(8) : PNG_1X1;
+        response.write(frame({ created: 1, b64_json: image.toString("base64") }));
       }
     }
 

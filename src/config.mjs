@@ -18,7 +18,7 @@ export const PKG_VERSION = (() => {
 
 export const BASE_URL = (process.env.CHATGPT2API_BASE_URL || "http://127.0.0.1:3000/v1").replace(/\/+$/, "");
 export const API_KEY = process.env.CHATGPT2API_API_KEY || "";
-export const DEFAULT_MODEL = process.env.IMAGEGEN_DEFAULT_MODEL || "gpt-image-2.5";
+export const DEFAULT_MODEL = process.env.IMAGEGEN_DEFAULT_MODEL || "gpt-image-2.6";
 
 /**
  * 单次上游调用超时。图生图实测 2 到 6 分钟一张，别调小。
@@ -72,8 +72,20 @@ export const MAX_GLOBAL_CONCURRENCY = (() => {
 /** chatgpt2api 单张参考图硬上限 50MB，base64 后约 1/3 膨胀，这里按原始字节卡 30MB。 */
 export const MAX_REFERENCE_BYTES = 30 * 1024 * 1024;
 
-/** 上游图片模型白名单。四个名字在上游都落到 auto 路由，属别名。 */
-export const IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"];
+/**
+ * 上游图片模型白名单。四个名字在上游都落到 auto 路由，属别名。
+ * 2026-11-06 起对齐 chatgpt2api 的 Images 2.6 命名（utils/helper.py WEB_IMAGE_MODELS）。
+ * 服务端仍接受 2.5 老名字（LEGACY 别名，校验放行），但不再对外暴露。
+ */
+export const IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"];
+
+/**
+ * animated=true 时追加到提示词末尾的硬约束。
+ * 实测（2026-11-06，Images 2.6 / free 账号）：上游对这句话服从，
+ * 提示词里点明的帧数会兑现（8/10/12/16 帧四组全部验证）。
+ */
+export const ANIMATED_DIRECTIVE =
+  "输出必须是多帧动画 GIF 文件（animated GIF），循环播放，不能是静态图片。若未指定帧数，8-16 帧。";
 
 /**
  * 尺寸只对方形真正生效。

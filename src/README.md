@@ -9,8 +9,8 @@
 | `job.mjs` | 任务归一化、路由、单次并发池、进程级在途闸门、错误隔离 | `runJobs` | tools |
 | `report.mjs` | 返回排版，纯函数不碰 IO | `formatReport` | tools |
 | `upstream.mjs` | SSE 客户端与模型探测 | `callUpstream`、`probeModels` | job, tools |
-| `storage.mjs` | 输出路径解析（文件/文件夹）、独占落盘、参考图编码、尺寸读取 | `resolveOutput`、`saveResultItems`、`toImageReference`、`writeUnique`、`sanitizeName`、`imageSize` | job |
-| `size.mjs` | 尺寸与比例归一 | `resolveSize`、`withComposition` | job |
+| `storage.mjs` | 输出路径解析（文件/文件夹）、独占落盘、参考图编码、尺寸与 GIF 帧数读取 | `resolveOutput`、`saveResultItems`、`toImageReference`、`writeUnique`、`sanitizeName`、`imageSize`、`countGifFrames` | job |
+| `size.mjs` | 尺寸与比例归一，含动画 GIF 的像素忽略与硬约束拼接 | `resolveSize`、`withComposition`、`withAnimated` | job |
 | `config.mjs` | 环境变量、路径、常量 | 全量常量 | 所有模块 |
 
 ## 依赖方向

@@ -36,7 +36,7 @@ param(
     [string]$BaseUrl = 'http://127.0.0.1:3000/v1',
     [string]$ApiKey = '',
     [string]$OutputDir = '',
-    [string]$Model = 'gpt-image-2.5',
+    [string]$Model = 'gpt-image-2.6',
     [int]$TimeoutMs = 600000,
     [switch]$SkipDeps,
     [switch]$SkipConfig

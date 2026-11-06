@@ -17,6 +17,8 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 - 一次调用跑多个任务，进程内自动并发，不必为了并发派多个子 agent。
 - 并发分两层：每次调用自己的 worker 池，整个进程还有一道在途闸门，两种用法效果一致。
 - 任务带参考图就是图生图，不带就是文生图，自动路由，调用方不判断接口。
+- **动画 GIF**：任务加 `animated: true` 即出多帧动图（上游 Images 2.6 能力，free 账号可用），
+  落盘 `.gif` 并在返回里报告帧数。
 - 图片默认落到项目 `output/`，也可用 `output` 一个路径指到本机任意绝对目录，指哪落哪。
 - 绝不覆盖已有文件：并发同一秒完成也不会互相覆盖。
 - 返回里带好可直接粘贴的 Markdown 图片引用，路径已转正斜杠，排版模板见 `info` 工具。
@@ -76,11 +78,12 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 | `resolution` | `1k` `2k` `4k`，只对方形真正生效 |
 | `size` | 精确像素，用户点名像素时才用 |
 | `n` | 每个任务出几张，1 到 4 |
+| `animated` | `true` 出多帧动画 GIF，帧数写进 prompt；`size`/`resolution` 会被忽略 |
 | `quality` | `auto` `low` `medium` `high`，上游实测无差异 |
-| `model` | 图片模型，四个名字在上游是同一个 auto 路由 |
+| `model` | 图片模型，四个名字（`gpt-image-2` / `gpt-image-2.6` / `-flare` / `-sunburst`）在上游是同一个 auto 路由 |
 | `concurrency` | 单次调用的并发，默认 3，上限 6 |
 
-任务级字段：`prompt` `images` `output` `n` `ratio` `resolution` `size` `quality` `model`。
+任务级字段：`prompt` `images` `output` `n` `animated` `ratio` `resolution` `size` `quality` `model`。
 
 每个任务的 `output` 互相独立，同一批里各写各的目录与文件名。
 `n` 大于 1 时自动派生 `三视图-2.png`、`三视图-3.png`。
@@ -94,7 +97,7 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 ## 返回格式
 
 ```text
-3/3 ok  59.3s  concurrency=3  model=gpt-image-2.5
+3/3 ok  59.3s  concurrency=3  model=gpt-image-2.6
 out  D:/ProjectSomething/imagegen-mcp/output/live
 
 #  type  status  time   size       file
@@ -157,7 +160,7 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | `CHATGPT2API_API_KEY` | 无 | 必需 |
 | `CHATGPT2API_BASE_URL` | `http://127.0.0.1:3000/v1` | 指向公网隧道时要带 `/v1` |
 | `IMAGEGEN_OUTPUT_DIR` | `<项目根>/output` | 输出根目录 |
-| `IMAGEGEN_DEFAULT_MODEL` | `gpt-image-2.5` | 默认模型 |
+| `IMAGEGEN_DEFAULT_MODEL` | `gpt-image-2.6` | 默认模型 |
 | `IMAGEGEN_TIMEOUT_MS` | `600000` | 我们这边放弃等待的时间，写错时回落默认值 |
 | `IMAGEGEN_MAX_RETRIES` | `2` | 网关类错误（502 503 504 524）的重试次数，0 表示不重试 |
 | `IMAGEGEN_MAX_CONCURRENCY` | `4` | 整个进程同时在途的上游请求上限 |
@@ -184,6 +187,7 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 | 真正能等多久 | `image_stream_timeout_secs + image_poll_timeout_secs + 30` | 出厂 170 秒，本机调到 360 秒。超过返回 503，**我们调自己的超时没用** |
 | 2K / 4K 是否达标 | `image_upscale_enabled` | 关着就只给约 1254 的边长 |
 | 实际分辨率 | 上游自己决定 | 请求 `1024x1024` 实得 `1254x1254` |
+| 动画 GIF 的尺寸与帧率 | 上游自己决定 | 实测 291~437px、每帧 100~250ms；工具只报帧数，无法指定 |
 | 每组回几张 | 上游 | 有时多回一张候选，落盘会全部保留 |
 | 是否回传原图 | 上游 | 偶尔把参考图原样当结果，返回里会告警 |
 | 会不会 524 | 反向代理与上游负载 | 重活并发高时容易触发，代码会自动退避重试 |
@@ -219,6 +223,9 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 - 单张参考图上限 30MB（服务端硬上限 50MB）。
 - 模型名四个在上游都落到同一个 auto 路由，属别名。
 - `quality` 作为请求体字段下发，上游实测无差异，四种档位出图没有可观察区别。
+- **动画 GIF 比静态图慢**：实测 50~65 秒/张（静态图约 35 秒），超时预算要留够。
+- **动画 GIF 偶发被上游内容防护拒绝**（实测约 5%，表现为 `upstream_text_reply` 错误体）：
+  同一份参数重发一次基本就过，不是服务端故障，重试不额外计费。
 
 ## 开发
 
