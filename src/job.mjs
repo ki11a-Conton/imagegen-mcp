@@ -9,7 +9,7 @@
 // 第 2 层保证「N 个 agent 各调 1 次」与「1 个 agent 调 1 次带 N 组任务」对上游压力一致。
 
 import { DEFAULT_CONCURRENCY, DEFAULT_MODEL, MAX_CONCURRENCY, MAX_GLOBAL_CONCURRENCY } from "./config.mjs";
-import { resolveSize, withComposition } from "./size.mjs";
+import { resolveSize, withComposition, withAnimated } from "./size.mjs";
 import { callUpstream } from "./upstream.mjs";
 import { referenceHash, resolveOutput, saveResultItems, toImageReference } from "./storage.mjs";
 
@@ -57,15 +57,21 @@ function normalizeJob(raw, defaults, index) {
     (item) => typeof item === "string" && item.trim(),
   );
 
-  const size = resolveSize({ size: job.size, resolution: job.resolution, ratio: job.ratio });
+  const size = resolveSize({
+    size: job.size,
+    resolution: job.resolution,
+    ratio: job.ratio,
+    animated: !!job.animated,
+  });
   const target = resolveOutput({ output: job.output });
 
   return {
     index,
-    prompt: withComposition(prompt, size.composition),
+    prompt: withAnimated(withComposition(prompt, size.composition), job.animated),
     images,
     route: images.length > 0 ? "edit" : "generate",
     model: job.model || DEFAULT_MODEL,
+    animated: !!job.animated,
     size: size.size,
     sizeNote: size.note,
     quality: job.quality && job.quality !== "auto" ? job.quality : "",
@@ -119,6 +125,15 @@ async function runJob(job) {
       })),
       note: [
         job.sizeNote,
+        // 动画任务如实报告产物：出了 .gif 给帧数，没出就明说是静态图，
+        // 调用方不用自己打开文件验证。
+        job.animated
+          ? saved
+              .map((file) =>
+                file.animated ? `动画 GIF ${file.frames} 帧` : "上游本轮回的是静态图，重发一次通常就出动图",
+              )
+              .join("；")
+          : "",
         echoed > 0 ? `${echoed} 张与参考图字节相同（上游回传原图，提示词未生效），请丢弃重试` : "",
       ]
         .filter(Boolean)

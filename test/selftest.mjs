@@ -6,9 +6,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { resolveSize, withComposition } from "../src/size.mjs";
-import { IMAGE_SIZES, OUTPUT_ROOT, SQUARE_SIZES } from "../src/config.mjs";
-import { extFromBuffer, imageSize, resolveOutput, sanitizeName, writeUnique } from "../src/storage.mjs";
+import { resolveSize, withComposition, withAnimated } from "../src/size.mjs";
+import { ANIMATED_DIRECTIVE, IMAGE_MODELS, IMAGE_SIZES, OUTPUT_ROOT, SQUARE_SIZES } from "../src/config.mjs";
+import {
+  countGifFrames,
+  extFromBuffer,
+  imageSize,
+  resolveOutput,
+  sanitizeName,
+  writeUnique,
+} from "../src/storage.mjs";
 import { formatReport } from "../src/report.mjs";
 
 let passed = 0;
@@ -70,6 +77,35 @@ await check("resolution=4k 下发的像素必须在 size 白名单里", () => {
 await check("构图拼进提示词", () => {
   assert.equal(withComposition("画猫", ""), "画猫");
   assert.match(withComposition("画猫", "横向构图"), /画猫[\s\S]*横向构图/);
+});
+
+// --- 动画 GIF：尺寸解析与提示词指令 ---
+await check("animated 忽略像素与档位，只保留构图提示", () => {
+  const result = resolveSize({ animated: true, size: "2048x2048", resolution: "4k" });
+  assert.equal(result.size, "", "动图不该下发像素");
+  assert.match(result.note, /动画 GIF/);
+});
+
+await check("animated + ratio 非方形仍写构图提示", () => {
+  const result = resolveSize({ animated: true, ratio: "16:9" });
+  assert.equal(result.size, "");
+  assert.match(result.composition, /16:9/);
+});
+
+await check("animated 把 GIF 硬约束拼进提示词", () => {
+  assert.equal(withAnimated("画猫", false), "画猫");
+  const withGif = withAnimated("画猫", true);
+  assert.match(withGif, /画猫[\s\S]*动画 GIF[\s\S]*循环播放/);
+  assert.ok(withGif.endsWith(ANIMATED_DIRECTIVE), "硬约束必须在提示词末尾");
+});
+
+await check("模型白名单为 2.6 系列", () => {
+  assert.deepEqual(IMAGE_MODELS, [
+    "gpt-image-2",
+    "gpt-image-2.6",
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6-sunburst",
+  ]);
 });
 
 // --- 输出路径解析（一个参数，靠形态区分文件与文件夹）---
@@ -155,6 +191,31 @@ await check("未知字节返回空串", () => {
   assert.equal(extFromBuffer(Buffer.from("not an image at all")), "");
 });
 
+// --- 动画 GIF：帧数与宽高 ---
+const gifFixture = (frames, width = 2, height = 2) => {
+  const head = Buffer.alloc(13);
+  head.write("GIF89a", 0, "latin1");
+  head.writeUInt16LE(width, 6);
+  head.writeUInt16LE(height, 8);
+  const gce = Buffer.from([0x21, 0xf9, 0x04, 0x00, 0x64, 0x00, 0x00]);
+  return Buffer.concat([head, ...Array.from({ length: frames }, () => gce)]);
+};
+
+await check("countGifFrames 数 GCE 块", () => {
+  assert.equal(countGifFrames(gifFixture(8)), 8);
+  assert.equal(countGifFrames(gifFixture(1)), 1);
+  assert.equal(countGifFrames(Buffer.from("GIF-not")), 0, "无 GCE 应为 0");
+});
+
+await check("countGifFrames 不认识的输入返回 0", () => {
+  assert.equal(countGifFrames(Buffer.alloc(4)), 0);
+  assert.equal(countGifFrames(Buffer.from("plain text that is not a gif")), 0);
+});
+
+await check("读取 GIF 宽高（小端 LSD）", () => {
+  assert.deepEqual(imageSize(gifFixture(2, 378, 250)), { width: 378, height: 250 });
+});
+
 await check("读取 PNG 宽高", () => {
   const buffer = Buffer.alloc(32);
   buffer.writeUInt8(0x89, 0);
@@ -207,7 +268,7 @@ const sampleBatch = (overrides = {}) => ({
       note: "",
     },
   ],
-  jobs: [{ model: "gpt-image-2.5" }],
+  jobs: [{ model: "gpt-image-2.6" }],
   concurrency: 1,
   ms: 1200,
   ...overrides,
@@ -229,7 +290,7 @@ await check("多张逐行给引用，不预设排版", () => {
       files: [{ path: "D:/out/四视图.png", width: 1672, height: 940, bytes: 1_700_000 }],
     },
   ];
-  batch.jobs = [{ model: "gpt-image-2.5" }, { model: "gpt-image-2.5" }];
+  batch.jobs = [{ model: "gpt-image-2.6" }, { model: "gpt-image-2.6" }];
   const text = formatReport(batch, { root: "D:/out" });
 
   // 每张各自独立成行。
@@ -265,7 +326,7 @@ await check("多行错误压成一行", () => {
 
 await check("混合模型标注为 mixed", () => {
   const batch = sampleBatch();
-  batch.jobs = [{ model: "gpt-image-2" }, { model: "gpt-image-2.5" }];
+  batch.jobs = [{ model: "gpt-image-2" }, { model: "gpt-image-2.6" }];
   batch.results = [batch.results[0], { ...batch.results[0], index: 1 }];
   assert.match(formatReport(batch, { root: "D:/out" }), /model=mixed/);
 });
@@ -281,7 +342,7 @@ await check("多组落在不同目录时给出提醒", () => {
       files: [{ path: "E:/其它/四视图.png", width: 800, height: 800, bytes: 200 }],
     },
   ];
-  batch.jobs = [{ model: "gpt-image-2.5" }, { model: "gpt-image-2.5" }];
+  batch.jobs = [{ model: "gpt-image-2.6" }, { model: "gpt-image-2.6" }];
   assert.match(formatReport(batch, { root: "D:/out" }), /多组落在不同目录/);
 });
 
@@ -293,6 +354,16 @@ await check("闸门比 worker 池窄时如实标注生效并发", () => {
 await check("闸门不比池窄时只报一个数", () => {
   const text = formatReport(sampleBatch({ concurrency: 3, gate: 4 }), { root: "D:/out" });
   assert.match(text, /concurrency=3\s/);
+});
+
+await check("动画文件在尺寸列带帧数", () => {
+  const batch = sampleBatch();
+  batch.results[0].files = [
+    { path: "D:/out/dance.gif", width: 378, height: 250, bytes: 140_000, animated: true, frames: 8 },
+  ];
+  const text = formatReport(batch, { root: "D:/out" });
+  assert.match(text, /378x250 8f/);
+  assert.match(text, /dance\.gif/);
 });
 
 // --- 结果 ---

@@ -230,7 +230,7 @@ async function main() {
               images: [referenceA],
               output: join(dirB, "two.png"),
               ratio: "9:16",
-              model: "gpt-image-2.5",
+              model: "gpt-image-2.6",
             },
             {
               prompt: "任务三 两张参考图",
@@ -257,7 +257,7 @@ async function main() {
 
       // 参数各自独立：模型、比例、张数。
       if (one.model !== "gpt-image-2") throw new Error("任务一模型应独立: " + one.model);
-      if (two.model !== "gpt-image-2.5") throw new Error("任务二模型应独立: " + two.model);
+      if (two.model !== "gpt-image-2.6") throw new Error("任务二模型应独立: " + two.model);
 
       // 任务一 16:9、任务二 9:16，各自把比例写进自己的提示词。
       if (!one.prompt.includes("16:9")) throw new Error("任务一提示词应含 16:9");
@@ -384,6 +384,52 @@ async function main() {
       }
       const text = textOf(await client.callTool({ name: "info", arguments: {} }));
       if (!text.includes("output=")) throw new Error("info 应报告输出目录");
+    });
+
+    await check("animated=true 落 .gif：硬约束进提示词、不传像素、报帧数", async () => {
+      const beforePayloads = mock.stats.payloads.length;
+      const text = textOf(
+        await client.callTool({
+          name: "create_images",
+          arguments: { prompt: "小章鱼跳舞，10 帧", animated: true, output: join(workspace, "gif") },
+        }),
+      );
+      if (!text.includes("1/1 ok")) throw new Error("动图任务应成功: " + text);
+
+      const sent = mock.stats.payloads.slice(beforePayloads)[0];
+      if (!sent.prompt.includes("animated GIF")) throw new Error("提示词应带 GIF 硬约束: " + sent.prompt);
+      if (sent.size !== "") throw new Error("动图不该下发像素，实际 size=" + sent.size);
+      if (sent.model !== "gpt-image-2.6") throw new Error("默认模型应为 2.6，实际 " + sent.model);
+
+      const entries = await readdir(join(workspace, "gif"));
+      const gifs = entries.filter((name) => name.endsWith(".gif"));
+      if (gifs.length !== 1) throw new Error("应落 1 个 .gif，实际 " + entries.join(" "));
+      const bytes = await readFile(join(workspace, "gif", gifs[0]));
+      if (bytes.subarray(0, 6).toString("latin1") !== "GIF89a") throw new Error("文件头应为 GIF89a");
+
+      // 8 帧是 mock 的固定产物；报告链路：尺寸列 8f + note 帧数。
+      if (!text.includes("8f")) throw new Error("表格尺寸列应带帧数 8f: " + text);
+      if (!text.includes("动画 GIF 8 帧")) throw new Error("note 应带帧数说明: " + text);
+    });
+
+    await check("animated=false 时提示词不带硬约束、不发像素指令", async () => {
+      const beforePayloads = mock.stats.payloads.length;
+      const text = textOf(
+        await client.callTool({
+          name: "create_images",
+          arguments: { jobs: [{ prompt: "小章鱼跳舞，10 帧", output: "gif-off" }] },
+        }),
+      );
+      if (!text.includes("1/1 ok")) throw new Error("应成功: " + text);
+
+      const sent = mock.stats.payloads.slice(beforePayloads)[0];
+      if (sent.prompt.includes("animated GIF")) throw new Error("不该追加 GIF 硬约束: " + sent.prompt);
+      if (!sent.prompt.includes("小章鱼跳舞")) throw new Error("原提示词应保留: " + sent.prompt);
+
+      const entries = await readdir(join(workspace, "gif-off"));
+      if (entries.some((name) => name.endsWith(".gif"))) {
+        throw new Error("未开 animated 不该落 .gif: " + entries.join(" "));
+      }
     });
 
     await client.close();
