@@ -18,6 +18,20 @@ export const PKG_VERSION = (() => {
 
 export const BASE_URL = (process.env.CHATGPT2API_BASE_URL || "http://127.0.0.1:3000/v1").replace(/\/+$/, "");
 export const API_KEY = process.env.CHATGPT2API_API_KEY || "";
+
+/**
+ * 启动自检：值还带着 `${credential:…}`，说明宿主没展开模板。
+ *
+ * 配置里只写引用、值放凭据库，靠的是 DSH 的 `expandTemplates`。
+ * 它没生效时上游只会回 401，报错文本看不出真正原因，所以这里先说清楚。
+ */
+export function apiKeyProblem(key = API_KEY) {
+  if (!key) return "api key not set";
+  if (key.includes("${credential:")) {
+    return "api key is still an unexpanded ${credential:…} template; set expandTemplates: true on the DSH MCP entry (rerun install.ps1)";
+  }
+  return "";
+}
 export const DEFAULT_MODEL = process.env.IMAGEGEN_DEFAULT_MODEL || "gpt-image-2.6";
 
 /**
