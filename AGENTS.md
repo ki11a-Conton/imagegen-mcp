@@ -11,6 +11,7 @@
 
 - `npm test` — 全部离线测试，不联网、不需要密钥。
 - `npm run verify` — lint + format 检查 + emoji 检查 + 测试，提交前跑这个。
+- `pre-commit install` — 装本地钩子（提交前自动 prettier --write + eslint --fix），一次性。
 - `npm run lint` / `npm run format` — ESLint 与 Prettier，项目本地安装。
 - `node src/index.mjs` — 直接起 stdio server，调试用。
 - `node src/setup.mjs --dry-run` — 预览配置写入与旧格式迁移，不落盘。
@@ -21,7 +22,7 @@
 ## 验证快照
 
 - CI：`.github/workflows/ci.yml`，矩阵 ubuntu + windows × node 20 / 22 / 24。
-- 离线测试：selftest 64 项 + integration 18 项。
+- 离线测试：selftest 65 项 + integration 18 项。
 - 真实上游并发实测：文生图 6 / 8 / 12 路全成功，图生图 8 路全成功。12 路未触顶。
   注意这只是**轻请求**（纯提示词或 1x1 假参考图）的结论。带多张真参考图的图生图请求体可达 7MB，并发 3 就会 524，不能外推。
 - 并发等价性：集成测试覆盖「1 次调用 2 组」与「2 次调用各 1 组」，两者峰值并发一致，落盘各 2 张。
