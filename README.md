@@ -258,8 +258,9 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 
 ```bash
 npm ci
-npm test          # 离线测试，不联网、不需要密钥
-npm run verify    # lint + format 检查 + emoji 检查 + 测试
+pre-commit install  # 可选：提交前自动跑 prettier 与 eslint
+npm test            # 离线测试，不联网、不需要密钥
+npm run verify      # lint + format 检查 + emoji 检查 + 测试
 ```
 
 维护者文档地图见 [AGENTS.md](AGENTS.md)。
