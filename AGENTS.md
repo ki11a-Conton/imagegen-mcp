@@ -6,6 +6,7 @@
 - 决策与依据 → [.agents/notes/](.agents/notes/)
 - 模块手册 → [src/README.md](src/README.md) · [test/README.md](test/README.md)
 - 改代码前先读该目录的 `AGENTS.md`，那里是规则层。
+- 契约变更（配置格式、安装流程、工具 schema）在同一次改动内 bump 版本，minor 起步。
 
 ## 常用命令
 
