@@ -5,18 +5,23 @@
 | 文件 | 职责 | 关键导出 | 被谁依赖 |
 | --- | --- | --- | --- |
 | `index.mjs` | 入口，建 McpServer 与 stdio 连接 | 无 | 无 |
+| `setup.mjs` | 安装期 CLI：探 profile、写托管块、把密钥搬进凭据库 | 无 | install.ps1 |
+| `dsh-config.mjs` | DSH 侧文本手术：托管块渲染/替换、旧明文识别、凭据库行级 upsert、薄 IO | `renderBlock`、`applyBlock`、`detectLegacySecret`、`upsertCredential`、`readBlockEnv` | setup |
 | `tools.mjs` | 工具注册与 schema，含 `info` 的用法速查文案 | `registerTools` | index |
 | `job.mjs` | 任务归一化、路由、单次并发池、进程级在途闸门、错误隔离 | `runJobs` | tools |
 | `report.mjs` | 返回排版，纯函数不碰 IO | `formatReport` | tools |
 | `upstream.mjs` | SSE 客户端与模型探测 | `callUpstream`、`probeModels` | job, tools |
 | `storage.mjs` | 输出路径解析（文件/文件夹）、独占落盘、参考图编码、尺寸与 GIF 帧数读取 | `resolveOutput`、`saveResultItems`、`toImageReference`、`writeUnique`、`sanitizeName`、`imageSize`、`countGifFrames` | job |
 | `size.mjs` | 尺寸与比例归一，含动画 GIF 的像素忽略与硬约束拼接 | `resolveSize`、`withComposition`、`withAnimated` | job |
-| `config.mjs` | 环境变量、路径、常量 | 全量常量 | 所有模块 |
+| `config.mjs` | 环境变量、路径、常量、启动自检 | 全量常量、`apiKeyProblem` | 所有模块 |
 
 ## 依赖方向
 
 `index` → `tools` → `job` → `{size, storage, upstream}` → `config`。
 禁止反向 import。
+
+`setup` → `dsh-config` → `config` 是安装期旁路：不进 MCP server 的运行时链路，
+`dsh-config` 也只依赖 Node 内置模块，方便离线测试。
 
 ## 变更影响路由
 
@@ -28,7 +33,9 @@
 - 改排版 → 补 selftest 的排版用例，注意中文双宽、多行错误、路径正斜杠。
 - 改工具名 → 同步 [../install.ps1](../install.ps1) 收尾提示、[../README.md](../README.md)、[../AGENTS.md](../AGENTS.md)。
 - 改上游客户端 → 跑 integration，假上游覆盖 SSE、CRLF、回传原图三种情况。
-- 新增环境变量 → 同步 `config.mjs`、[../README.md](../README.md)、[../install.ps1](../install.ps1) 三处。
+- 新增环境变量 → 同步 `config.mjs`、[../README.md](../README.md)、`setup.mjs` 的 `MANAGED_ENV` 与 `renderBlock`。
+- 改配置块结构或凭据写法 → 同步 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)、[../README.md](../README.md) 的「密钥放哪」一节，并补 selftest。
+  托管块标记 `# >>> imagegen-mcp` **不能改**：旧装法写的就是这两行，改了就认不出旧块。
 
 ## 规则
 
