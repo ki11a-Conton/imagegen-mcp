@@ -7,7 +7,26 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { resolveSize, withComposition, withAnimated } from "../src/size.mjs";
-import { ANIMATED_DIRECTIVE, IMAGE_MODELS, IMAGE_SIZES, OUTPUT_ROOT, SQUARE_SIZES } from "../src/config.mjs";
+import {
+  ANIMATED_DIRECTIVE,
+  apiKeyProblem,
+  IMAGE_MODELS,
+  IMAGE_SIZES,
+  OUTPUT_ROOT,
+  SQUARE_SIZES,
+} from "../src/config.mjs";
+import {
+  applyBlock,
+  detectLegacySecret,
+  findForeignEntry,
+  maskSecret,
+  pickProfile,
+  readBlockEnv,
+  readCredential,
+  renderBlock,
+  scrubSecret,
+  upsertCredential,
+} from "../src/dsh-config.mjs";
 import {
   countGifFrames,
   extFromBuffer,
@@ -364,6 +383,217 @@ await check("动画文件在尺寸列带帧数", () => {
   const text = formatReport(batch, { root: "D:/out" });
   assert.match(text, /378x250 8f/);
   assert.match(text, /dance\.gif/);
+});
+
+// --- DSH 配置写入与旧格式迁移 ---
+const renderFixture = (overrides = {}) =>
+  renderBlock({
+    command: "E:\\nodejs\\node.exe",
+    entry: "C:\\Users\\me\\.dsh\\mcp\\imagegen-mcp\\src\\index.mjs",
+    cwd: "C:\\Users\\me\\.dsh\\mcp\\imagegen-mcp",
+    baseUrl: "https://api.example.com/v1",
+    model: "gpt-image-2.6",
+    timeoutMs: 600000,
+    ...overrides,
+  });
+
+// 旧装法写出来的样子：密钥是明文，且块外还有用户自己的条目与注释。
+const LEGACY_PATCH =
+  [
+    "# 用户自己的注释，必须逐字保留",
+    "- id: ui-theme",
+    "  config:",
+    "    fontSize: 16",
+    "",
+    "# >>> imagegen-mcp (managed by install.ps1)",
+    "- insert:",
+    "    - id: mcp-imagegen",
+    '      name: "@deepseek-ai/dsh-mcp-client"',
+    "      config:",
+    "        serverName: imagegen",
+    "        transport: stdio",
+    '        command: "E:/nodejs/node.exe"',
+    "        args:",
+    '          - "C:/Users/me/.dsh/mcp/imagegen-mcp/src/index.mjs"',
+    '        cwd: "C:/Users/me/.dsh/mcp/imagegen-mcp"',
+    "        env:",
+    '          CHATGPT2API_API_KEY: "sk-abcdefghijklmnopqrstuvwxyz"',
+    '          CHATGPT2API_BASE_URL: "https://api.example.com/v1"',
+    '          IMAGEGEN_DEFAULT_MODEL: "gpt-image-2.6"',
+    '          IMAGEGEN_TIMEOUT_MS: "600000"',
+    "        toolCallTimeoutMs: 660000",
+    "# <<< imagegen-mcp",
+    "",
+    "- id: plugin-market",
+    "  config:",
+    "    indexes: []",
+  ].join("\n") + "\n";
+
+const LEGACY_SECRET_LINE = 18;
+
+const STORE_FIXTURE =
+  [
+    "version: 1",
+    "",
+    "refs:",
+    "  # 这一行注释要留着",
+    "  CPA_API_KEY: cpa-123",
+    "  OPENCODE_API_KEY: oc-456",
+    "",
+    "records:",
+    "  llm-pi-ai/openai-codex:",
+    "    kind: grant",
+    "    payload:",
+    "      access: xyz",
+  ].join("\n") + "\n";
+
+await check("托管块只写凭据引用，不含明文也不含反斜杠", () => {
+  const text = renderFixture().join("\n");
+  assert.match(text, /expandTemplates: true/);
+  assert.match(text, /CHATGPT2API_API_KEY: "\$\{credential:CHATGPT2API_API_KEY\}"/);
+  assert.ok(!text.includes("sk-"), "块里不该出现密钥");
+  assert.ok(!text.includes("\\"), "路径必须转正斜杠");
+});
+
+await check("识别旧格式的明文密钥与行号", () => {
+  const found = detectLegacySecret(LEGACY_PATCH);
+  assert.equal(found?.value, "sk-abcdefghijklmnopqrstuvwxyz");
+  assert.equal(found?.line, LEGACY_SECRET_LINE);
+});
+
+await check("新格式不再被当成旧明文", () => {
+  const migrated = applyBlock(LEGACY_PATCH, renderFixture()).text;
+  assert.equal(detectLegacySecret(migrated), null);
+});
+
+await check("占位符与 !!js 表达式都不算旧明文", () => {
+  const placeholder = LEGACY_PATCH.replace(
+    '"sk-abcdefghijklmnopqrstuvwxyz"',
+    '"<填入 chatgpt2api 用户密钥>"',
+  );
+  const expression = LEGACY_PATCH.replace(
+    '"sk-abcdefghijklmnopqrstuvwxyz"',
+    "!!js process.env.CHATGPT2API_API_KEY",
+  );
+  assert.equal(detectLegacySecret(placeholder), null);
+  assert.equal(detectLegacySecret(expression), null);
+});
+
+await check("替换托管块时块外的注释与条目逐字保留", () => {
+  const { text, action } = applyBlock(LEGACY_PATCH, renderFixture());
+  assert.equal(action, "replaced");
+  assert.ok(text.startsWith("# 用户自己的注释，必须逐字保留\n- id: ui-theme\n"));
+  assert.ok(text.includes("- id: plugin-market"));
+  assert.equal(text.match(/# >>> imagegen-mcp/g).length, 1);
+  assert.equal(text.match(/id: mcp-imagegen/g).length, 1);
+});
+
+await check("同一份块再写一次是 unchanged", () => {
+  const once = applyBlock(LEGACY_PATCH, renderFixture()).text;
+  assert.deepEqual(applyBlock(once, renderFixture()), { text: once, action: "unchanged" });
+});
+
+await check("没有托管块时追加，前面补空行", () => {
+  const { text, action } = applyBlock("- id: locale\n  config: {}\n", renderFixture());
+  assert.equal(action, "appended");
+  assert.match(text, /config: \{\}\n\n# >>> imagegen-mcp/);
+  assert.ok(text.endsWith("# <<< imagegen-mcp\n"));
+});
+
+await check("换行风格沿用原文件", () => {
+  const crlf = LEGACY_PATCH.replace(/\n/g, "\r\n");
+  const { text } = applyBlock(crlf, renderFixture());
+  assert.ok(text.includes("\r\n"));
+  assert.ok(!/[^\r]\n/.test(text), "不该混进裸 LF");
+});
+
+await check("凭据库为空时建出合规文档", () => {
+  const { text, action } = upsertCredential("", "CHATGPT2API_API_KEY", "sk-abc");
+  assert.equal(action, "created");
+  assert.equal(text, "version: 1\n\nrefs:\n  CHATGPT2API_API_KEY: sk-abc\n");
+});
+
+await check("新引用插在 refs 段末尾，records 与注释原样保留", () => {
+  const { text, action } = upsertCredential(STORE_FIXTURE, "CHATGPT2API_API_KEY", "sk-abc");
+  assert.equal(action, "created");
+  const lines = text.split("\n");
+  assert.equal(lines[lines.indexOf("  OPENCODE_API_KEY: oc-456") + 1], "  CHATGPT2API_API_KEY: sk-abc");
+  assert.ok(text.includes("  # 这一行注释要留着"));
+  assert.ok(text.includes("records:\n  llm-pi-ai/openai-codex:"));
+});
+
+await check("已存在同名同值时不重写", () => {
+  const { text, action } = upsertCredential(STORE_FIXTURE, "CPA_API_KEY", "cpa-123");
+  assert.equal(action, "kept");
+  assert.equal(text, STORE_FIXTURE);
+});
+
+await check("已存在同名不同值时默认不覆盖", () => {
+  const { text, action, existing } = upsertCredential(STORE_FIXTURE, "CPA_API_KEY", "cpa-999");
+  assert.equal(action, "conflict");
+  assert.equal(existing, "cpa-123");
+  assert.equal(text, STORE_FIXTURE);
+});
+
+await check("--force 才覆盖已有值", () => {
+  const { text, action } = upsertCredential(STORE_FIXTURE, "CPA_API_KEY", "cpa-999", { force: true });
+  assert.equal(action, "updated");
+  assert.equal(readCredential(text, "CPA_API_KEY"), "cpa-999");
+  assert.ok(text.includes("  OPENCODE_API_KEY: oc-456"), "相邻条目不该被动");
+});
+
+await check("含冒号空格的值加引号并能原样读回", () => {
+  const value = "sk-a: b #c";
+  const { text } = upsertCredential("", "K", value);
+  assert.ok(text.includes('K: "sk-a: b #c"'));
+  assert.equal(readCredential(text, "K"), value);
+});
+
+await check("块外已有同名条目时报出行号", () => {
+  assert.equal(findForeignEntry("- id: mcp-imagegen\n  config: {}\n"), 1);
+  assert.equal(findForeignEntry(LEGACY_PATCH), null);
+});
+
+await check("重装时能读回上一版块里的环境变量", () => {
+  const previous = readBlockEnv(LEGACY_PATCH);
+  assert.equal(previous.CHATGPT2API_BASE_URL, "https://api.example.com/v1");
+  assert.equal(previous.IMAGEGEN_TIMEOUT_MS, "600000");
+  assert.equal(previous.IMAGEGEN_MAX_CONCURRENCY, undefined);
+});
+
+await check("用户自加的环境变量原样带进新块", () => {
+  const text = renderFixture({ extraEnv: { IMAGEGEN_MAX_CONCURRENCY: "8" } }).join("\n");
+  assert.match(text, /IMAGEGEN_MAX_CONCURRENCY: "8"/);
+});
+
+await check("预览不泄漏完整密钥", () => {
+  const masked = maskSecret("sk-abcdefghijklmnopqrstuvwxyz");
+  assert.match(masked, /^sk-abc/);
+  assert.ok(!masked.includes("mnopqrstuv"));
+});
+
+await check("备份里的明文密钥会被抹掉，结构保留", () => {
+  const scrubbed = scrubSecret(LEGACY_PATCH);
+  assert.ok(!scrubbed.includes("sk-abcdefghijklmnopqrstuvwxyz"));
+  assert.match(scrubbed, /CHATGPT2API_API_KEY: "<moved to credentials.yaml>"/);
+  assert.ok(scrubbed.includes("- id: plugin-market"), "块外内容要留着");
+  assert.equal(
+    scrubSecret(applyBlock(LEGACY_PATCH, renderFixture()).text),
+    applyBlock(LEGACY_PATCH, renderFixture()).text,
+  );
+});
+
+await check("未展开的凭据模板会被启动自检点名", () => {
+  assert.match(apiKeyProblem("${credential:CHATGPT2API_API_KEY}"), /expandTemplates/);
+  assert.equal(apiKeyProblem("sk-real"), "");
+  assert.match(apiKeyProblem(""), /not set/);
+});
+
+await check("多 profile 时优先 web", () => {
+  assert.equal(pickProfile(["headless", "tui", "web"]), "web");
+  assert.equal(pickProfile(["tui"]), "tui");
+  assert.equal(pickProfile(["tui"], "web"), null);
+  assert.equal(pickProfile([]), null);
 });
 
 // --- 结果 ---

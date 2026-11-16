@@ -13,13 +13,15 @@
 - `npm run verify` — lint + format 检查 + emoji 检查 + 测试，提交前跑这个。
 - `npm run lint` / `npm run format` — ESLint 与 Prettier，项目本地安装。
 - `node src/index.mjs` — 直接起 stdio server，调试用。
+- `node src/setup.mjs --dry-run` — 预览配置写入与旧格式迁移，不落盘。
+- `node src/setup.mjs` — 真写配置：托管块 + 凭据库，幂等。
 
 检查选择：改源码 → `npm run verify`；改文档 → 链接校验；改 `package.json` → 全套。
 
 ## 验证快照
 
 - CI：`.github/workflows/ci.yml`，矩阵 ubuntu + windows × node 20 / 22 / 24。
-- 离线测试：selftest 36 项 + integration 16 项。
+- 离线测试：selftest 64 项 + integration 18 项。
 - 真实上游并发实测：文生图 6 / 8 / 12 路全成功，图生图 8 路全成功。12 路未触顶。
   注意这只是**轻请求**（纯提示词或 1x1 假参考图）的结论。带多张真参考图的图生图请求体可达 7MB，并发 3 就会 524，不能外推。
 - 并发等价性：集成测试覆盖「1 次调用 2 组」与「2 次调用各 1 组」，两者峰值并发一致，落盘各 2 张。
@@ -34,8 +36,12 @@
 ## 活跃坑
 
 - `.ps1` 必须是 UTF-8 with BOM。用普通写文件工具改写会丢 BOM，PowerShell 5.1 按 GBK 解码直接语法错。
-- `install.ps1` 里不能写未加括号的 `'key: ' + $value`。PowerShell 逗号比加号绑得紧，会拆成两个数组元素，YAML 直接解析失败。
-- PowerShell 的 `$Home` 是只读自动变量，函数参数不能叫这个名字。
+- `install.ps1` 只探环境、拷文件、装依赖；DSH 配置与密钥一律交给 `src/setup.mjs`。
+  别把 YAML 拼装搬回 PowerShell：那里既没法进 `npm test`，还踩过逗号绑定的坑。
+- `install.ps1` 只往下传**显式给出**的参数。补默认值会让重装把用户调好的地址、目录改回默认。
+- 托管块标记 `# >>> imagegen-mcp` / `# <<< imagegen-mcp` 不许改：旧格式靠它定位，
+  改了会在同一文件里追加第二份 `id: mcp-imagegen`，DSH 报 duplicate loader entry id。
+- 凭据库里同名不同值时默认不覆盖，只有 `--force` 才换。安装脚本静默覆盖会改掉用户换过的密钥。
 - `report.mjs` 里中文文件名必须留在最后一列，放中间会把 ASCII 列对齐撑歪。
 - `info` 的列表必须走 `columns()`：中文双宽，手敲空格补出来的对齐只在等宽字体下凑巧成立。
 - 改完 `install.ps1` 要用 PowerShell 5.1 与 7 各跑一次。

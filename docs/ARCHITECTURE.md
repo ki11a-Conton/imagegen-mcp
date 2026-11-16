@@ -12,6 +12,7 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。
 - 落盘绝不覆盖已有文件。并发与重名靠随机量与独占创建解决，不靠调用方自律。
 - 方形才下发像素尺寸。非方形靠提示词约束构图，避免上游方图被服务端硬拉变形。
 - 超时以服务端 deadline 为准。我们自己的超时更大，改它不解决 503。
+- 配置文件里不出现密钥。值只进 DSH 凭据库，配置块写 `${credential:REF}` 引用。
 
 ## 谁定边界
 
@@ -39,6 +40,21 @@ tools.mjs        收参数，合并顶层默认值与任务级覆盖
 依赖只自上而下：tools → job → {size, storage, upstream} → config。
 report 是纯函数，不碰 IO，也不反向依赖上层。
 
+## 安装期数据流
+
+```text
+install.ps1       探 Node / DSH 主目录 → 拷文件 → npm install
+  setup.mjs       探 profile → 认旧明文 → 写凭据库 → 渲染并替换托管块
+    dsh-config    纯函数：块渲染 / 块替换 / 明文识别 / 凭据库行级 upsert
+```
+
+配置写入刻意放在 Node 侧而不是 PowerShell：能进 `npm test` 离线覆盖，
+也不必在 YAML 字符串拼接上跟 PowerShell 的语法细节缠斗。
+`install.ps1` 只往下传显式给出的参数，其余由 `setup.mjs` 沿用上一版块里的值。
+
+两处文件都按行处理，不做 YAML 解析：`cordis.patch.yml` 里有 `!!js` 标签，
+通用解析器读不了；`.credentials.yaml` 里有 DSH 自己写的注释，解析后重写会把注释冲掉。
+
 ## 关键决策
 
 每条的背景与替代方案见 `.agents/notes/`。
@@ -63,6 +79,12 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 新增顶层默认参数时，必须同时加进 `inputSchema` 和 `defaults`。只加一处会被静默丢弃。
 - 删除参数时这两处要一起删。zod 会剥掉未知字段，调用方继续传旧参数**不会报错**，只会静默失效。
 - 上游调用必须走 `callUpstreamLimited`，不要直接调 `callUpstream`。绕过闸门会让多次调用的在途总量失控。
+- 托管块标记 `# >>> imagegen-mcp` 与 `# <<< imagegen-mcp` 是旧格式的识别锚点，**不许改**。
+  改了会认不出旧块，在同一文件里追加第二份 `id: mcp-imagegen`，DSH 直接报 duplicate loader entry id。
+- 凭据库里同名不同值时默认不覆盖（用户后填的为准），只有 `--force` 才换。
+  装脚本静默覆盖会悄悄改掉用户已经换过的密钥。
+- 启动自检里 `apiKeyProblem` 必须保留：模板没被展开时上游只回 401，
+  不点名 `expandTemplates` 就会让人往错误方向查。
 
 ## 契约
 
@@ -73,6 +95,7 @@ report 是纯函数，不碰 IO，也不反向依赖上层。
 - 展示规范以 `info` 的 `display` 段为准：图片独立成段、一格只放一个元素、图文相邻不用表格、说明写表头、只用纯 Markdown、路径用正斜杠。
 - 方括号是 alt 不是图注：要配文另起一段，要可点链接去掉感叹号。
 - `env` 只认七个变量：`CHATGPT2API_API_KEY`、`CHATGPT2API_BASE_URL`、`IMAGEGEN_OUTPUT_DIR`、`IMAGEGEN_DEFAULT_MODEL`、`IMAGEGEN_TIMEOUT_MS`、`IMAGEGEN_MAX_CONCURRENCY`、`IMAGEGEN_MAX_RETRIES`。
+  其中 `CHATGPT2API_API_KEY` 在配置里永远是 `${credential:…}` 模板，真值在 DSH 凭据库。
 - 网关类错误（502 503 504 524）必须走重试，且错误文本要压成一行：网关返回整页 HTML，原样塞进返回会撑爆表格。
   唯一的例外是 503 带 `task_interrupted`：那是服务端 deadline 判定，重试只会再撞同一条截止线。
 - 单张参考图上限 30MB（服务端硬上限 50MB，base64 还有约 1/3 膨胀）。

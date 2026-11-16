@@ -1,22 +1,37 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    imagegen-mcp 安装脚本：拷贝文件、装依赖、自动写入 DSH 的 MCP 配置。
+    imagegen-mcp 安装脚本：拷贝文件、装依赖，配置交给 src/setup.mjs 写。
 
 .DESCRIPTION
-    所有路径按当前机器自动探测，不需要手改 YAML：
+    脚本只做 PowerShell 擅长的事：探环境、拷文件、装依赖。
+    DSH 配置与密钥由 Node 侧写（src/setup.mjs）：那里能离线测试，
+    也不必在 YAML 字符串拼接上跟 PowerShell 的语法细节缠斗。
+
+    步骤：
       1. 找 Node（PATH 与常见安装位置）
       2. 找 DSH 主目录（DSH_HOME 或 ~/.dsh）
-      3. 找 profile（profiles 下有 cordis.patch.yml 的那个）
-      4. 拷贝到 DSH_HOME/mcp/imagegen-mcp
-      5. npm install
-      6. 写入或替换 cordis.patch.yml 里的 mcp-imagegen 配置块
+      3. 拷贝到 DSH_HOME/mcp/imagegen-mcp
+      4. npm install
+      5. node src/setup.mjs —— 写 profile 配置，把密钥放进凭据库
+
+    密钥落点：<DSH_HOME>/.credentials.yaml 的 refs，配置里只留 ${credential:…} 引用。
+    旧装法写在 cordis.patch.yml 里的明文密钥会被自动识别并搬过去。
 
 .PARAMETER ApiKey
-    chatgpt2api 的用户密钥。不填则保留占位符，装完自己补。
+    chatgpt2api 的用户密钥。写进凭据库；不填则沿用旧配置，再没有就留空等你自己补。
 
 .PARAMETER BaseUrl
-    chatgpt2api 的 /v1 地址。漏了 /v1 会自动补上。
+    chatgpt2api 的 /v1 地址。不填则沿用上一版配置。漏了 /v1 会自动补上。
+
+.PARAMETER Model
+    默认模型。不填则沿用上一版配置。
+
+.PARAMETER TimeoutMs
+    单次上游超时。不填则沿用上一版配置。
+
+.PARAMETER OutputDir
+    默认落盘目录。不填则沿用上一版配置。
 
 .EXAMPLE
     ./install.ps1 -ApiKey sk-xxxx
@@ -25,7 +40,7 @@
     ./install.ps1 -ApiKey sk-xxxx -BaseUrl https://xxx.trycloudflare.com/v1 -Profile web
 
 .EXAMPLE
-    ./install.ps1 -ApiKey sk-xxxx -SkipDeps
+    ./install.ps1 -SkipDeps
 #>
 [CmdletBinding()]
 param(
@@ -33,19 +48,17 @@ param(
     [string]$Profile = '',
     [string]$TargetDir = '',
     [string]$NodePath = '',
-    [string]$BaseUrl = 'http://127.0.0.1:3000/v1',
+    [string]$BaseUrl = '',
     [string]$ApiKey = '',
     [string]$OutputDir = '',
-    [string]$Model = 'gpt-image-2.6',
-    [int]$TimeoutMs = 600000,
+    [string]$Model = '',
+    [int]$TimeoutMs = 0,
     [switch]$SkipDeps,
     [switch]$SkipConfig
 )
 
 $ErrorActionPreference = 'Stop'
 $script:here = $PSScriptRoot
-$script:blockStart = '# >>> imagegen-mcp (managed by install.ps1)'
-$script:blockEnd = '# <<< imagegen-mcp'
 
 function Write-Step([string]$Text) { Write-Host ('==> ' + $Text) -ForegroundColor Cyan }
 function Write-Detail([string]$Text) { Write-Host ('    ' + $Text) -ForegroundColor DarkGray }
@@ -79,123 +92,6 @@ function Resolve-DshHome {
     return (Join-Path $env:USERPROFILE '.dsh')
 }
 
-function Resolve-Profile([string]$Root) {
-    $profilesDir = Join-Path $Root 'profiles'
-    if (-not (Test-Path $profilesDir)) { return $null }
-
-    if ($Profile) {
-        $candidate = Join-Path $profilesDir $Profile
-        if (Test-Path $candidate) { return $Profile }
-        return $null
-    }
-
-    $withPatch = @(Get-ChildItem $profilesDir -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-Path (Join-Path $_.FullName 'cordis.patch.yml') })
-
-    if ($withPatch.Count -eq 0) { return $null }
-    if ($withPatch.Count -eq 1) { return $withPatch[0].Name }
-
-    $web = $withPatch | Where-Object { $_.Name -eq 'web' } | Select-Object -First 1
-    if ($web) { return $web.Name }
-    return $withPatch[0].Name
-}
-
-function Build-ConfigBlock {
-    param(
-        [string]$NodeFile,
-        [string]$EntryFile,
-        [string]$WorkDir,
-        [string]$Url,
-        [string]$Key
-    )
-
-    $node = $NodeFile.Replace('\', '/')
-    $entry = $EntryFile.Replace('\', '/')
-    $dir = $WorkDir.Replace('\', '/')
-    $keyValue = if ($Key) { $Key } else { '<填入 chatgpt2api 用户密钥>' }
-
-    # 注意：PowerShell 里逗号比 + 绑得紧，数组元素里的字符串拼接必须自己加括号，
-    # 否则 'key: ' + $value 会被拆成两个元素，写出来的 YAML 直接解析失败。
-    $lines = @(
-        $script:blockStart,
-        '- insert:',
-        '    - id: mcp-imagegen',
-        '      name: "@deepseek-ai/dsh-mcp-client"',
-        '      config:',
-        '        serverName: imagegen',
-        '        transport: stdio',
-        ('        command: ' + $node),
-        '        args:',
-        ('          - ' + $entry),
-        ('        cwd: ' + $dir),
-        '        env:',
-        ('          CHATGPT2API_API_KEY: ' + (ConvertTo-YamlValue $keyValue)),
-        ('          CHATGPT2API_BASE_URL: ' + (ConvertTo-YamlValue $Url)),
-        ('          IMAGEGEN_DEFAULT_MODEL: ' + (ConvertTo-YamlValue $Model)),
-        ('          IMAGEGEN_TIMEOUT_MS: "' + $TimeoutMs + '"')
-    )
-
-    if ($OutputDir) {
-        $lines += ('          IMAGEGEN_OUTPUT_DIR: ' + (ConvertTo-YamlValue $OutputDir.Replace('\', '/')))
-    }
-
-    $lines += @(
-        ('        toolCallTimeoutMs: ' + ($TimeoutMs + 60000)),
-        $script:blockEnd
-    )
-    return $lines
-}
-
-# YAML 标量一律双引号包裹并转义内部引号，密钥里出现 # : { } 也不会破坏解析。
-function ConvertTo-YamlValue([string]$Value) {
-    $escaped = $Value.Replace('\', '\\').Replace('"', '\"')
-    return '"' + $escaped + '"'
-}
-
-# 滚动备份：改 cordis.patch.yml 前留一份，同名互相覆盖，永远只有最近 1 份。
-# 铺开时间戳备份会让 DSH 主目录越攒越多（已为此清过一轮），所以固定单一文件名。
-function Backup-PatchFile([string]$Path) {
-    if (-not (Test-Path $Path)) { return }
-    $backup = "$Path.bak"
-    Copy-Item -LiteralPath $Path -Destination $backup -Force
-    Write-Detail ('backup   ' + $backup)
-}
-
-function Update-PatchFile {
-    param([string]$Path, [string[]]$Block)
-
-    $existing = @()
-    if (Test-Path $Path) { $existing = @(Get-Content -Path $Path -Encoding UTF8) }
-
-    $startAt = -1
-    $endAt = -1
-    for ($i = 0; $i -lt $existing.Count; $i++) {
-        $trimmed = $existing[$i].Trim()
-        if ($trimmed -eq $script:blockStart) { $startAt = $i }
-        elseif ($trimmed -eq $script:blockEnd) { $endAt = $i }
-    }
-
-    if ($startAt -ge 0 -and $endAt -gt $startAt) {
-        $head = @()
-        if ($startAt -gt 0) { $head = $existing[0..($startAt - 1)] }
-        $tail = @()
-        if ($endAt -lt ($existing.Count - 1)) { $tail = $existing[($endAt + 1)..($existing.Count - 1)] }
-        $merged = @($head) + @($Block) + @($tail)
-        $action = 'replaced'
-    }
-    else {
-        $merged = @($existing)
-        if ($merged.Count -gt 0 -and $merged[$merged.Count - 1].Trim() -ne '') { $merged += '' }
-        $merged += @($Block)
-        $action = 'appended'
-    }
-
-    $content = ($merged -join [Environment]::NewLine) + [Environment]::NewLine
-    $encoding = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($Path, $content, $encoding)
-    return $action
-}
-
 Write-Step 'probe environment'
 
 $nodeFile = Resolve-Node
@@ -212,10 +108,6 @@ if (-not (Test-Path $homeDir)) { Write-Note 'DSH home does not exist yet; config
 
 $target = if ($TargetDir) { [System.IO.Path]::GetFullPath($TargetDir) } else { Join-Path $homeDir 'mcp/imagegen-mcp' }
 Write-Detail ('install ' + $target)
-
-$profileName = Resolve-Profile $homeDir
-if ($profileName) { Write-Detail ('profile ' + $profileName) }
-else { Write-Note 'no profile with cordis.patch.yml found; config write will be skipped' }
 
 Write-Step 'copy files'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
@@ -252,32 +144,25 @@ else {
 if ($SkipConfig) {
     Write-Step 'skip config write (-SkipConfig)'
 }
-elseif (-not $profileName) {
-    Write-Step 'skip config write (profile not found)'
-}
 else {
-    Write-Step 'write DSH config'
+    # 只把显式给出的参数往下传，没给的由 setup.mjs 沿用上一版配置，
+    # 否则「再装一遍」会把调好的地址、目录悄悄改回默认值。
+    $setupArgs = @((Join-Path $target 'src/setup.mjs'), '--dsh-home', $homeDir)
+    if ($Profile) { $setupArgs += @('--profile', $Profile) }
+    if ($ApiKey) { $setupArgs += @('--api-key', $ApiKey) }
+    if ($BaseUrl) { $setupArgs += @('--base-url', $BaseUrl) }
+    if ($Model) { $setupArgs += @('--model', $Model) }
+    if ($OutputDir) { $setupArgs += @('--output-dir', $OutputDir) }
+    if ($TimeoutMs -gt 0) { $setupArgs += @('--timeout-ms', [string]$TimeoutMs) }
 
-    $url = $BaseUrl.TrimEnd('/')
-    if ($url -notmatch '/v1$') {
-        $url = $url + '/v1'
-        Write-Detail ('normalized to ' + $url)
-    }
-
-    $patchPath = Join-Path (Join-Path (Join-Path $homeDir 'profiles') $profileName) 'cordis.patch.yml'
-    $entryFile = Join-Path (Join-Path $target 'src') 'index.mjs'
-    $block = Build-ConfigBlock -NodeFile $nodeFile -EntryFile $entryFile -WorkDir $target -Url $url -Key $ApiKey
-    Backup-PatchFile -Path $patchPath
-    $action = Update-PatchFile -Path $patchPath -Block $block
-
-    Write-Ok ($action + ' ' + $patchPath)
-    if (-not $ApiKey) { Write-Note 'no -ApiKey given; placeholder left in YAML, fill it before restarting DSH' }
+    & $nodeFile @setupArgs
+    if ($LASTEXITCODE -ne 0) { throw ('config write failed with exit code ' + $LASTEXITCODE) }
 }
 
 Write-Host ''
 Write-Step 'done'
 Write-Detail 'restart DSH, then tools create_images / info are available'
-Write-Detail ('default output: ' + (Join-Path $target 'output') + ' (pass output: "sub" to categorize)')
+Write-Detail ('key lives in ' + (Join-Path $homeDir '.credentials.yaml') + ', not in the profile config')
 Write-Detail 'for 2K/4K enable image_upscale_enabled in chatgpt2api'
 
 # robocopy 成功时也会返回 1，脚本结束前显式清零，避免被当成失败。

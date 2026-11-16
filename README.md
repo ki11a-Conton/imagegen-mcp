@@ -31,22 +31,48 @@ DSH 自身没有生图工具，模型只能回「我没有生图能力」。这�
 ./install.ps1 -ApiKey sk-xxxx
 ```
 
-脚本自动探测 Node、DSH 主目录和 profile，拷贝文件、装依赖，并把 `mcp-imagegen` 配置块写进
+脚本自动探测 Node、DSH 主目录和 profile，拷贝文件、装依赖，再把 `mcp-imagegen` 挂进
 `<DSH_HOME>/profiles/<profile>/cordis.patch.yml`。重启 DSH 后工具可用。
 
-重复安装原地替换同一个配置块，不会重复追加。改写前自动备份到 `cordis.patch.yml.bak`（固定单份，
-下次安装覆盖）。PowerShell 5.1 与 7 都支持。
+重复安装原地替换同一个配置块，不会重复追加；没显式给的参数沿用上一版配置，
+所以重装不会把调好的地址、目录改回默认值。改写前自动备份到 `*.bak`（固定单份，
+下次安装覆盖）；迁移时会把备份里的明文密钥一并抹掉，回退点只留结构。
+PowerShell 5.1 与 7 都支持。
+
+### 密钥放哪
+
+**配置里不放密钥。** 值进 `<DSH_HOME>/.credentials.yaml` 的 `refs`，配置块里只留引用：
+
+```yaml
+        expandTemplates: true
+        env:
+          CHATGPT2API_API_KEY: "${credential:CHATGPT2API_API_KEY}"
+```
+
+`expandTemplates` 让 DSH 在拉起本进程前把引用换成真值，并把换出来的值在报错、日志里
+一律写成 `[redacted]`。好处是 `cordis.patch.yml` 可以随便看、随便贴，`--dump-config`
+也不会漏密钥。
+
+旧装法（明文密钥直接写在配置块里）不用手工处理：再跑一次安装就会自动识别，
+把值搬进凭据库并把配置改写成引用。只想迁移不想重装：
+
+```powershell
+node <DSH_HOME>/mcp/imagegen-mcp/src/setup.mjs --dry-run   # 先看要做什么
+node <DSH_HOME>/mcp/imagegen-mcp/src/setup.mjs             # 再落盘
+```
 
 常用参数：
 
 | 参数 | 说明 |
 | --- | --- |
-| `-ApiKey` | chatgpt2api 的用户密钥，不填则 YAML 里留占位符 |
-| `-BaseUrl` | 默认 `http://127.0.0.1:3000/v1`，漏 `/v1` 会自动补 |
+| `-ApiKey` | chatgpt2api 的用户密钥，写进凭据库；不填则沿用旧配置 |
+| `-BaseUrl` | 上游 `/v1` 地址，不填则沿用旧配置，首次默认 `http://127.0.0.1:3000/v1` |
 | `-Profile` | 有多个 profile 时指定，缺省优先 `web` |
 | `-DshHome` | 默认 `$env:DSH_HOME` 或 `~/.dsh` |
 | `-TargetDir` | 默认 `<DSH_HOME>/mcp/imagegen-mcp` |
 | `-NodePath` | 自动探测失败时手动指定 node.exe |
+| `-Model` | 默认模型，不填则沿用旧配置 |
+| `-TimeoutMs` | 单次上游超时，不填则沿用旧配置 |
 | `-OutputDir` | 覆盖默认输出根目录 |
 | `-SkipDeps` | 跳过 npm install |
 | `-SkipConfig` | 只拷文件，不写 DSH 配置 |
@@ -213,7 +239,8 @@ out  D:/ProjectSomething/imagegen-mcp/output/live
 ## 安全边界
 
 - 图片只写到本地输出目录，不经过任何第三方。
-- 上游地址与密钥由你自己在 DSH 配置里给，本仓库不含任何密钥。
+- 上游地址与密钥由你自己在 DSH 里给，本仓库不含任何密钥；配置里只写引用，
+  值存 DSH 凭据库（`<DSH_HOME>/.credentials.yaml`）。
 - 参考图只接受图片扩展名，路径穿越会被拒绝。
 
 ## 已知限制
