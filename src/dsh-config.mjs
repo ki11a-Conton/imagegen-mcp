@@ -99,6 +99,10 @@ export function renderBlock({
     "- insert:",
     "    - id: " + entryId,
     '      name: "@deepseek-ai/dsh-mcp-client"',
+    "      # 用了 ${credential:…} 就必须在加载阶段等到凭据提供方，mcp-client 的",
+    "      # 构造函数会查 ctx.get('credentials')，缺了这句整条直接加载失败。",
+    "      inject:",
+    "        - credentials",
     "      config:",
     "        serverName: " + serverName,
     "        transport: stdio",
@@ -168,6 +172,43 @@ export function detectLegacySecret(text, ref = DEFAULT_REF) {
     return { value, line: i + 1 };
   }
   return null;
+}
+
+/**
+ * 识别第二种旧格式：块里用了 `${credential:…}`，却没有 `inject: [credentials]`。
+ *
+ * 这种块能写进 profile，但 DSH 加载时会整条失败：
+ *   mcp-imagegen (@deepseek-ai/dsh-mcp-client): Error: MCP credential templates
+ *   require a credentials provider
+ * 因为 mcp-client 在构造函数里就查 `ctx.get('credentials')`，而 `inject` 是
+ * 加载阶段的等待声明——不声明它，插件可能在凭据服务就绪之前就开始 apply。
+ *
+ * 返回 true 表示该块需要重写（重写块本身就是迁移，旧值由 readBlockEnv 带走）。
+ */
+export function needsCredentialInject(text) {
+  const lines = splitLines(text);
+  const block = findBlock(lines);
+  if (!block) return false;
+
+  let usesTemplate = false;
+  let declared = false;
+  let insideInject = false;
+  for (let i = block.start; i <= block.end; i += 1) {
+    const line = lines[i];
+    if (line.includes("${credential:")) usesTemplate = true;
+    if (/^\s*inject:\s*$/.test(line)) {
+      insideInject = true;
+      continue;
+    }
+    if (!insideInject) continue;
+    if (/^\s*-\s*credentials\s*$/.test(line)) {
+      declared = true;
+      insideInject = false;
+      continue;
+    }
+    if (line.trim() !== "" && !/^\s*-/.test(line)) insideInject = false;
+  }
+  return usesTemplate && !declared;
 }
 
 /** 已经是引用、占位符或用户自己的表达式，都不算旧明文。 */

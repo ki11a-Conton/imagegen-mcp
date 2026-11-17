@@ -43,6 +43,9 @@
 - `install.ps1` 只往下传**显式给出**的参数。补默认值会让重装把用户调好的地址、目录改回默认。
 - 托管块标记 `# >>> imagegen-mcp` / `# <<< imagegen-mcp` 不许改：旧格式靠它定位，
   改了会在同一文件里追加第二份 `id: mcp-imagegen`，DSH 报 duplicate loader entry id。
+- 托管块必须带 `inject: [credentials]`：块里有 `${credential:…}` 时，mcp-client
+  在构造函数里查 `ctx.get('credentials')`，缺了就整条加载失败，
+  报错只有 `MCP credential templates require a credentials provider`，看不出是缺 inject。
 - 凭据库里同名不同值时默认不覆盖，只有 `--force` 才换。安装脚本静默覆盖会改掉用户换过的密钥。
 - `report.mjs` 里中文文件名必须留在最后一列，放中间会把 ASCII 列对齐撑歪。
 - `info` 的列表必须走 `columns()`：中文双宽，手敲空格补出来的对齐只在等宽字体下凑巧成立。

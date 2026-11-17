@@ -27,6 +27,7 @@ import {
   findForeignEntry,
   listProfiles,
   maskSecret,
+  needsCredentialInject,
   patchPath,
   pickProfile,
   readBlockEnv,
@@ -169,6 +170,14 @@ const block = renderBlock({
   extraEnv: Object.fromEntries(Object.entries(previous).filter(([name]) => !MANAGED_ENV.has(name))),
 });
 const applied = applyBlock(patchText, block);
+
+// 第二种旧格式：块里有 ${credential:…} 却没写 inject: [credentials]。
+// 这种块会让 DSH 报 "MCP credential templates require a credentials provider"，
+// 整条 mcp-imagegen 加载失败、工具全不出来。重写块即可，无需手工改。
+if (needsCredentialInject(patchText)) {
+  note("上一版块缺 inject: [credentials]，那正是 DSH 报 credential templates 的原因");
+  detail("已随本次重写补上，不用手工改 profile");
+}
 
 if (dryRun) {
   detail("would write " + target + "（" + applied.action + "）");

@@ -44,17 +44,26 @@ PowerShell 5.1 与 7 都支持。
 **配置里不放密钥。** 值进 `<DSH_HOME>/.credentials.yaml` 的 `refs`，配置块里只留引用：
 
 ```yaml
+    - id: mcp-imagegen
+      name: "@deepseek-ai/dsh-mcp-client"
+      inject:
+        - credentials
+      config:
         expandTemplates: true
         env:
           CHATGPT2API_API_KEY: "${credential:CHATGPT2API_API_KEY}"
 ```
 
+`inject` 不能省：用了 `${credential:…}` 就必须在加载阶段等凭据提供方就绪，
+否则 mcp-client 的构造函数查不到 `ctx.get('credentials')`，整条条目加载失败，
+DSH 只报一句 `MCP credential templates require a credentials provider`。
+
 `expandTemplates` 让 DSH 在拉起本进程前把引用换成真值，并把换出来的值在报错、日志里
 一律写成 `[redacted]`。好处是 `cordis.patch.yml` 可以随便看、随便贴，`--dump-config`
 也不会漏密钥。
 
-旧装法（明文密钥直接写在配置块里）不用手工处理：再跑一次安装就会自动识别，
-把值搬进凭据库并把配置改写成引用。只想迁移不想重装：
+旧装法（明文密钥直接写在配置块里，或块里漏了 `inject`）不用手工处理：再跑一次安装
+就会自动识别并重写这一块。只想迁移不想重装：
 
 ```powershell
 node <DSH_HOME>/mcp/imagegen-mcp/src/setup.mjs --dry-run   # 先看要做什么
