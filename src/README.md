@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `index.mjs` | 入口，建 McpServer 与 stdio 连接 | 无 | 无 |
 | `setup.mjs` | 安装期 CLI：探 profile、写托管块、把密钥搬进凭据库 | 无 | install.ps1 |
-| `dsh-config.mjs` | DSH 侧文本手术：托管块渲染/替换、旧明文识别、凭据库行级 upsert、薄 IO | `renderBlock`、`applyBlock`、`detectLegacySecret`、`upsertCredential`、`readBlockEnv` | setup |
+| `dsh-config.mjs` | DSH 侧文本手术：托管块渲染/替换、旧明文与缺 `inject` 识别、凭据库行级 upsert、薄 IO | `renderBlock`、`applyBlock`、`detectLegacySecret`、`needsCredentialInject`、`upsertCredential`、`readBlockEnv` | setup |
 | `tools.mjs` | 工具注册与 schema，含 `info` 的用法速查文案 | `registerTools` | index |
 | `job.mjs` | 任务归一化、路由、单次并发池、进程级在途闸门、错误隔离 | `runJobs` | tools |
 | `report.mjs` | 返回排版，纯函数不碰 IO | `formatReport` | tools |

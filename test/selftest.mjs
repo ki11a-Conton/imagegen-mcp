@@ -20,6 +20,7 @@ import {
   detectLegacySecret,
   findForeignEntry,
   maskSecret,
+  needsCredentialInject,
   pickProfile,
   readBlockEnv,
   readCredential,
@@ -453,6 +454,30 @@ await check("托管块只写凭据引用，不含明文也不含反斜杠", () =
   assert.match(text, /CHATGPT2API_API_KEY: "\$\{credential:CHATGPT2API_API_KEY\}"/);
   assert.ok(!text.includes("sk-"), "块里不该出现密钥");
   assert.ok(!text.includes("\\"), "路径必须转正斜杠");
+});
+
+// 用了 ${credential:…} 却不声明 inject，DSH 会让整条 mcp-imagegen 加载失败：
+//   Error: MCP credential templates require a credentials provider
+await check("模板块必须声明 inject: [credentials]", () => {
+  const text = renderFixture().join("\n");
+  assert.match(text, /^ {6}inject:\n {8}- credentials$/m);
+  assert.equal(needsCredentialInject(text), false);
+});
+
+await check("缺 inject 的旧块能被识别成待迁移", () => {
+  // 就是本次事故里的那一版块：有模板、没有 inject。
+  const broken = renderFixture()
+    .filter((line) => !/^\s*(inject:|- credentials)$/.test(line))
+    .join("\n");
+  assert.ok(broken.includes("${credential:"));
+  assert.equal(needsCredentialInject(broken), true);
+  assert.equal(needsCredentialInject(applyBlock(broken, renderFixture()).text), false);
+});
+
+await check("不写模板的块不要求 inject", () => {
+  const plain = LEGACY_PATCH;
+  assert.ok(!plain.includes("${credential:"));
+  assert.equal(needsCredentialInject(plain), false);
 });
 
 await check("识别旧格式的明文密钥与行号", () => {

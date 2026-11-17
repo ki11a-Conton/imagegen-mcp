@@ -83,6 +83,9 @@ install.ps1       探 Node / DSH 主目录 → 拷文件 → npm install
   改了会认不出旧块，在同一文件里追加第二份 `id: mcp-imagegen`，DSH 直接报 duplicate loader entry id。
 - 凭据库里同名不同值时默认不覆盖（用户后填的为准），只有 `--force` 才换。
   装脚本静默覆盖会悄悄改掉用户已经换过的密钥。
+- 托管块里用了 `${credential:…}` 就必须写 `inject: [credentials]`。
+  mcp-client 在构造函数里查 `ctx.get('credentials')`，没声明就是整条加载失败，
+  DSH 只报 `MCP credential templates require a credentials provider`，看不出是缺 inject。
 - 启动自检里 `apiKeyProblem` 必须保留：模板没被展开时上游只回 401，
   不点名 `expandTemplates` 就会让人往错误方向查。
 
